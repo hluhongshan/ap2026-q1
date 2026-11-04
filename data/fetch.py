@@ -136,10 +136,12 @@ def fetch_cffex(session: requests.Session):
             path = CFFEX_DIR / f"{day:%Y%m%d}_1.csv"
             if path.exists() and path.stat().st_size > 0:
                 existing = path.read_text(encoding="utf-8", errors="replace")
-                if "合约代码" in existing:
-                    skipped += 1
-                    continue
-                log.warning("CFFEX %s cached response is not a quote file; refetching", day)
+                skipped += 1
+                if "合约代码" not in existing:
+                    noncsv += 1
+                    failed_dates.append({"date": day.isoformat(), "status": "non_csv_200"})
+                    log.info("CFFEX %s cached response is a non-CSV holiday page; not refetching", day)
+                continue
             url = CFFEX_URL.format(ym=f"{day:%Y%m}", dd=f"{day:%d}", ymd=f"{day:%Y%m%d}")
             try:
                 response = session.get(url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30))
@@ -303,6 +305,55 @@ def load_csi() -> tuple[pd.DataFrame, str]:
     return frame, source
 
 
+def resolve_expiry_dates(csi: pd.DataFrame, nominal_dates: set[date]) -> tuple[dict[date, date], dict]:
+    calendar = sorted(csi["date"])
+    calendar_set = set(calendar)
+    if not calendar:
+        mapping = {nominal: nominal for nominal in nominal_dates}
+        validation = {
+            "calendar_start": None,
+            "calendar_end": None,
+            "rolled": [],
+            "verified": [],
+            "unverified_future": sorted(nominal.isoformat() for nominal in nominal_dates),
+        }
+        return mapping, validation
+    last = calendar[-1]
+    mapping = {}
+    rolled = []
+    verified = []
+    unverified_future = []
+    for nominal in sorted(nominal_dates):
+        if nominal > last:
+            mapping[nominal] = nominal
+            unverified_future.append(nominal.isoformat())
+        elif nominal in calendar_set:
+            mapping[nominal] = nominal
+            verified.append(nominal.isoformat())
+        else:
+            rolled_to = next((day for day in calendar if day > nominal), None)
+            if rolled_to is None:
+                mapping[nominal] = nominal
+                unverified_future.append(nominal.isoformat())
+            else:
+                mapping[nominal] = rolled_to
+                rolled.append(
+                    {
+                        "nominal": nominal.isoformat(),
+                        "expiry": rolled_to.isoformat(),
+                        "reason": "holiday_roll",
+                    }
+                )
+    validation = {
+        "calendar_start": calendar[0].isoformat(),
+        "calendar_end": last.isoformat(),
+        "rolled": rolled,
+        "verified": verified,
+        "unverified_future": unverified_future,
+    }
+    return mapping, validation
+
+
 def build_options(csi: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     csi_close = dict(zip(csi["date"], csi["close"]))
     csi_dates = set(csi["date"])
@@ -361,8 +412,18 @@ def build_options(csi: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             "invalid_codes": invalid_codes,
             "dropped_on_or_after_expiry": 0,
             "expiry_flags": [],
+            "expiry_validation": {
+                "calendar_start": None,
+                "calendar_end": None,
+                "rolled": [],
+                "verified": [],
+                "unverified_future": [],
+            },
         }
     options = pd.concat(frames, ignore_index=True)
+    nominal_dates = set(options["expiry"])
+    expiry_mapping, expiry_validation = resolve_expiry_dates(csi, nominal_dates)
+    options["expiry"] = options["expiry"].map(expiry_mapping)
     options = options[options["K"] > 0].copy()
     dropped = options[options["date"] >= options["expiry"]].copy()
     dropped_count = len(dropped)
@@ -376,22 +437,21 @@ def build_options(csi: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     options["date"] = pd.to_datetime(options["date"]).dt.strftime("%Y-%m-%d")
     options["expiry"] = pd.to_datetime(options["expiry"]).dt.strftime("%Y-%m-%d")
     options = options.sort_values(["date", "expiry", "cp", "K"]).reset_index(drop=True)
-    expiries = sorted(pd.to_datetime(options["expiry"]).dt.date.unique())
-    expiry_flags = []
-    for expiry in expiries:
-        if expiry not in csi_dates:
-            if csi.empty or expiry > max(csi_dates):
-                reason = "beyond CSI 300 data horizon"
-            else:
-                reason = "not a trading day in CSI 300 data"
-            expiry_flags.append({"expiry": expiry.isoformat(), "reason": reason})
-            log.warning("expiry %s is %s", expiry, reason)
+    expiry_flags = [
+        {"expiry": expiry, "reason": "unverified_future"}
+        for expiry in expiry_validation["unverified_future"]
+    ]
+    for item in expiry_validation["rolled"]:
+        log.info("expiry %s rolled to %s", item["nominal"], item["expiry"])
+    for expiry in expiry_validation["unverified_future"]:
+        log.warning("expiry %s is unverified_future", expiry)
     stats = {
         "raw_io_rows": raw_io,
         "ignored_non_io": ignored_non_io,
         "invalid_codes": invalid_codes,
         "dropped_on_or_after_expiry": dropped_count,
         "expiry_flags": expiry_flags,
+        "expiry_validation": expiry_validation,
     }
     return options, stats
 
@@ -554,6 +614,19 @@ def run_assertions(
     expiry_ok = bool((pd.to_datetime(options["expiry"]) > pd.to_datetime(options["date"])).all()) if not options.empty else False
     check("expiry after date", expiry_ok, "all retained rows have expiry > date")
 
+    if options.empty or csi.empty:
+        historical_ok = False
+        historical_detail = "options or CSI calendar is empty"
+    else:
+        calendar = set(pd.to_datetime(csi["date"]).dt.date)
+        last_calendar_day = max(calendar)
+        expiries = sorted(pd.to_datetime(options["expiry"]).dt.date.unique())
+        historical = [day for day in expiries if day <= last_calendar_day]
+        missing_expiries = [day.isoformat() for day in historical if day not in calendar]
+        historical_ok = bool(historical) and not missing_expiries
+        historical_detail = f"historical_expiries={len(historical)} non_trading={missing_expiries}"
+    check("each historical expiry is a trading day", historical_ok, historical_detail)
+
     missing_s = int(options["S"].isna().sum()) if not options.empty else 0
     check("S present on every date", missing_s == 0, f"rows missing S={missing_s}")
 
@@ -701,12 +774,16 @@ def print_report(month_report, date_report, sina, build_stats, assertions):
         assertion_table.add_row(item["name"], "PASS" if item["passed"] else "FAIL", item["detail"])
     console.print(assertion_table)
 
-    if build_stats.get("expiry_flags"):
-        flag_table = Table(title="Expiry flags")
-        flag_table.add_column("Expiry")
-        flag_table.add_column("Reason")
-        for item in build_stats["expiry_flags"]:
-            flag_table.add_row(item["expiry"], item["reason"])
+    validation = build_stats.get("expiry_validation", {})
+    if validation.get("rolled") or validation.get("unverified_future"):
+        flag_table = Table(title="Expiry validation")
+        flag_table.add_column("Nominal")
+        flag_table.add_column("Resolved")
+        flag_table.add_column("Status")
+        for item in validation.get("rolled", []):
+            flag_table.add_row(item["nominal"], item["expiry"], "rolled_holiday")
+        for expiry in validation.get("unverified_future", []):
+            flag_table.add_row(expiry, expiry, "unverified_future")
         console.print(flag_table)
 
 

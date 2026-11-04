@@ -1,12 +1,12 @@
 {
-  "created_at": "2026-11-04T17:45:18+08:00",
+  "created_at": "2026-11-04T17:48:00+08:00",
   "akshare_version": "1.20.25",
   "artifacts": {
     "data/clean/options_io.csv": {
       "path": "data/clean/options_io.csv",
       "source": "CFFEX IO daily quotes; CSI 300 close from akshare.stock_zh_index_daily",
       "interface": "http://www.cffex.com.cn/sj/hqsj/rtj/ + akshare index interfaces",
-      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "retrieval_time": "2026-11-04T17:48:00+08:00",
       "schema": [
         "date",
         "contract",
@@ -23,13 +23,13 @@
         "S"
       ],
       "rows": 30068,
-      "sha256": "6b30ee02bdc10decd66ecf8939f84efcebb660be8dd29e310a5cb6632766cc8d"
+      "sha256": "53f5c3d734be184cd5637c076d8a44359674425f4ff82c2d300ba4fff68d9313"
     },
     "data/clean/shibor.csv": {
       "path": "data/clean/shibor.csv",
       "source": "China Shibor",
       "interface": "akshare.macro_china_shibor_all",
-      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "retrieval_time": "2026-11-04T17:48:00+08:00",
       "schema": [
         "date",
         "ON",
@@ -48,7 +48,7 @@
       "path": "data/clean/sina_comparison.csv",
       "source": "CFFEX close vs Sina option daily close",
       "interface": "akshare.option_cffex_hs300_daily_sina",
-      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "retrieval_time": "2026-11-04T17:48:00+08:00",
       "schema": [
         "date",
         "contract",
@@ -67,58 +67,58 @@
     {
       "interface": "CFFEX daily quotes",
       "status": "ok",
-      "detail": "downloaded=2 skipped=124 non200=2 noncsv200=1 errors=0",
+      "detail": "downloaded=0 skipped=128 non200=0 noncsv200=3 errors=0",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/cffex",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "CSI 300 close",
       "status": "skipped",
       "detail": "using cached source=akshare.stock_zh_index_daily",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/csi300.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "Shibor",
       "status": "skipped",
       "detail": "cached shibor.csv",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/shibor.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "LPR",
       "status": "skipped",
       "detail": "cached lpr.csv",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/lpr.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "SSE option current day",
       "status": "skipped",
       "detail": "cached option_current_day_sse.csv",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/option_current_day_sse.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "ETF 510050",
       "status": "skipped",
       "detail": "using cached source=akshare.fund_etf_hist_sina",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510050.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "ETF 510300",
       "status": "skipped",
       "detail": "using cached source=akshare.fund_etf_hist_sina",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510300.csv",
-      "retrieved_at": "2026-11-04T17:45:17+08:00"
+      "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "Sina option cross-check",
       "status": "skipped",
       "detail": "cached comparison",
       "path": "/Users/luhao/E-Study/ap2026/data/raw/sina_comparison.csv",
-      "retrieved_at": "2026-11-04T17:45:18+08:00"
+      "retrieved_at": "2026-11-04T17:48:00+08:00"
     }
   ],
   "csi_source": "akshare.stock_zh_index_daily",
@@ -129,30 +129,67 @@
     "dropped_on_or_after_expiry": 376,
     "expiry_flags": [
       {
-        "expiry": "2026-06-19",
-        "reason": "not a trading day in CSI 300 data"
-      },
-      {
         "expiry": "2026-11-20",
-        "reason": "beyond CSI 300 data horizon"
+        "reason": "unverified_future"
       },
       {
         "expiry": "2026-12-18",
-        "reason": "beyond CSI 300 data horizon"
+        "reason": "unverified_future"
       },
       {
         "expiry": "2027-03-19",
-        "reason": "beyond CSI 300 data horizon"
+        "reason": "unverified_future"
       },
       {
         "expiry": "2027-06-18",
-        "reason": "beyond CSI 300 data horizon"
+        "reason": "unverified_future"
       },
       {
         "expiry": "2027-09-17",
-        "reason": "beyond CSI 300 data horizon"
+        "reason": "unverified_future"
       }
-    ]
+    ],
+    "expiry_validation": {
+      "calendar_start": "2002-01-04",
+      "calendar_end": "2026-11-04",
+      "rolled": [
+        {
+          "nominal": "2026-06-19",
+          "expiry": "2026-06-22",
+          "reason": "holiday_roll"
+        }
+      ],
+      "verified": [
+        "2024-03-15",
+        "2024-04-19",
+        "2024-05-17",
+        "2024-06-21",
+        "2024-09-20",
+        "2024-10-18",
+        "2024-11-15",
+        "2024-12-20",
+        "2025-03-21",
+        "2025-04-18",
+        "2025-05-16",
+        "2025-06-20",
+        "2025-09-19",
+        "2025-10-17",
+        "2025-11-21",
+        "2025-12-19",
+        "2026-03-20",
+        "2026-04-17",
+        "2026-05-15",
+        "2026-09-18",
+        "2026-10-16"
+      ],
+      "unverified_future": [
+        "2026-11-20",
+        "2026-12-18",
+        "2027-03-19",
+        "2027-06-18",
+        "2027-09-17"
+      ]
+    }
   },
   "sample_dates": [
     "2024-03-15",
@@ -246,6 +283,11 @@
       "name": "expiry after date",
       "passed": true,
       "detail": "all retained rows have expiry > date"
+    },
+    {
+      "name": "each historical expiry is a trading day",
+      "passed": true,
+      "detail": "historical_expiries=22 non_trading=[]"
     },
     {
       "name": "S present on every date",
