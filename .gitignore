@@ -1,0 +1,34 @@
+# Virtual environments
+.venv/
+venv/
+
+# Caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.uv-cache/
+.cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+credentials*
+
+# Notebooks
+*.ipynb
+
+# Raw data (committed snapshots go to data/clean/)
+data/raw/*
+!data/raw/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
