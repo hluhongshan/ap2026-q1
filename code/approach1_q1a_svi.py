@@ -1181,6 +1181,32 @@ def load_cffex_futures(raw_dir: Path) -> tuple[pd.DataFrame, dict]:
     return frame, stats
 
 
+def matched_q_stats(group: pd.DataFrame, basis_col: str) -> dict:
+    matched = group[np.isfinite(group[basis_col].to_numpy(dtype=float))]
+    if matched.empty:
+        return {
+            "n": 0,
+            "implied_q_mean": float("nan"),
+            "implied_q_median": float("nan"),
+            "if_basis_mean": float("nan"),
+            "if_basis_median": float("nan"),
+            "q_minus_if_basis_mean": float("nan"),
+            "q_minus_if_basis_median": float("nan"),
+        }
+    q = matched.q.to_numpy(dtype=float)
+    basis = matched[basis_col].to_numpy(dtype=float)
+    diff = q - basis
+    return {
+        "n": int(len(matched)),
+        "implied_q_mean": float(np.mean(q)),
+        "implied_q_median": float(np.median(q)),
+        "if_basis_mean": float(np.mean(basis)),
+        "if_basis_median": float(np.median(basis)),
+        "q_minus_if_basis_mean": float(np.mean(diff)),
+        "q_minus_if_basis_median": float(np.median(diff)),
+    }
+
+
 def forward_check(forwards: pd.DataFrame, futures: pd.DataFrame, source_stats: dict) -> tuple[pd.DataFrame, dict]:
     obs = forwards[["date", "expiry", "T", "days", "r", "DF", "S0", "F", "q"]].copy()
     obs["month"] = obs.date.dt.strftime("%Y-%m")
@@ -1209,6 +1235,8 @@ def forward_check(forwards: pd.DataFrame, futures: pd.DataFrame, source_stats: d
         obs.r - np.log(obs.if_close / obs.S0) / obs["T"],
         np.nan,
     )
+    obs["q_minus_if_basis_settle"] = obs.q - obs.if_basis_settle
+    obs["q_minus_if_basis_close"] = obs.q - obs.if_basis_close
 
     def dist(values: pd.Series) -> dict:
         arr = np.asarray(values, dtype=float)
@@ -1222,55 +1250,89 @@ def forward_check(forwards: pd.DataFrame, futures: pd.DataFrame, source_stats: d
 
     by_month = []
     for month, group in obs.groupby("month", sort=True):
+        settle_stats = matched_q_stats(group, "if_basis_settle")
+        close_stats = matched_q_stats(group, "if_basis_close")
         by_month.append({
             "month": month,
             "forwards": int(len(group)),
-            "matched_settle": int(group.if_settle.notna().sum()),
-            "matched_close": int(group.if_close.notna().sum()),
-            "implied_q_median": float(group.q.median()),
-            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
-            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+            "matched_settle": settle_stats["n"],
+            "matched_close": close_stats["n"],
+            "implied_q_median": settle_stats["implied_q_median"],
+            "implied_q_matched_median": settle_stats["implied_q_median"],
+            "implied_q_all_median": float(group.q.median()),
+            "if_basis_settle_median": settle_stats["if_basis_median"],
+            "if_basis_close_median": close_stats["if_basis_median"],
+            "q_minus_if_basis_settle_mean": settle_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_settle_median": settle_stats["q_minus_if_basis_median"],
+            "q_minus_if_basis_close_mean": close_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_close_median": close_stats["q_minus_if_basis_median"],
             "if_dev_settle": dist(group.if_rel_settle),
             "if_dev_close": dist(group.if_rel_close),
         })
     by_month_bucket = []
     for (month, bucket), group in obs.groupby(["month", "tenor_bucket"], sort=True):
+        settle_stats = matched_q_stats(group, "if_basis_settle")
+        close_stats = matched_q_stats(group, "if_basis_close")
         by_month_bucket.append({
             "month": month,
             "tenor_bucket": bucket,
             "forwards": int(len(group)),
-            "matched_settle": int(group.if_settle.notna().sum()),
-            "implied_q_median": float(group.q.median()),
-            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
-            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+            "matched_settle": settle_stats["n"],
+            "matched_close": close_stats["n"],
+            "implied_q_median": settle_stats["implied_q_median"],
+            "implied_q_matched_median": settle_stats["implied_q_median"],
+            "implied_q_all_median": float(group.q.median()),
+            "if_basis_settle_median": settle_stats["if_basis_median"],
+            "if_basis_close_median": close_stats["if_basis_median"],
+            "q_minus_if_basis_settle_mean": settle_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_settle_median": settle_stats["q_minus_if_basis_median"],
+            "q_minus_if_basis_close_mean": close_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_close_median": close_stats["q_minus_if_basis_median"],
             "if_dev_settle_median": float(group.if_rel_settle.median()) if group.if_rel_settle.notna().any() else float("nan"),
             "if_dev_close_median": float(group.if_rel_close.median()) if group.if_rel_close.notna().any() else float("nan"),
         })
     by_bucket = []
     for bucket, group in obs.groupby("tenor_bucket", sort=True):
+        settle_stats = matched_q_stats(group, "if_basis_settle")
+        close_stats = matched_q_stats(group, "if_basis_close")
         by_bucket.append({
             "tenor_bucket": bucket,
             "forwards": int(len(group)),
-            "matched_settle": int(group.if_settle.notna().sum()),
-            "implied_q_median": float(group.q.median()),
-            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
-            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+            "matched_settle": settle_stats["n"],
+            "matched_close": close_stats["n"],
+            "implied_q_median": settle_stats["implied_q_median"],
+            "implied_q_matched_median": settle_stats["implied_q_median"],
+            "implied_q_all_median": float(group.q.median()),
+            "if_basis_settle_median": settle_stats["if_basis_median"],
+            "if_basis_close_median": close_stats["if_basis_median"],
+            "q_minus_if_basis_settle_mean": settle_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_settle_median": settle_stats["q_minus_if_basis_median"],
+            "q_minus_if_basis_close_mean": close_stats["q_minus_if_basis_mean"],
+            "q_minus_if_basis_close_median": close_stats["q_minus_if_basis_median"],
         })
+    overall_settle = matched_q_stats(obs, "if_basis_settle")
+    overall_close = matched_q_stats(obs, "if_basis_close")
     summary = {
         "source": source_stats,
         "forwards": int(len(obs)),
-        "matched_settle": int(obs.if_settle.notna().sum()),
-        "matched_close": int(obs.if_close.notna().sum()),
-        "unmatched": int(len(obs) - obs.if_settle.notna().sum()),
+        "matched_settle": overall_settle["n"],
+        "matched_close": overall_close["n"],
+        "unmatched": int(len(obs) - overall_settle["n"]),
         "if_dev_settle": dist(obs.if_rel_settle),
         "if_dev_close": dist(obs.if_rel_close),
-        "implied_q_median": float(obs.q.median()),
-        "if_basis_settle_median": float(obs.if_basis_settle.median()) if obs.if_basis_settle.notna().any() else float("nan"),
-        "if_basis_close_median": float(obs.if_basis_close.median()) if obs.if_basis_close.notna().any() else float("nan"),
+        "implied_q_median": overall_settle["implied_q_median"],
+        "implied_q_matched_median": overall_settle["implied_q_median"],
+        "implied_q_all_median": float(obs.q.median()),
+        "if_basis_settle_median": overall_settle["if_basis_median"],
+        "if_basis_close_median": overall_close["if_basis_median"],
+        "q_minus_if_basis_settle_mean": overall_settle["q_minus_if_basis_mean"],
+        "q_minus_if_basis_settle_median": overall_settle["q_minus_if_basis_median"],
+        "q_minus_if_basis_close_mean": overall_close["q_minus_if_basis_mean"],
+        "q_minus_if_basis_close_median": overall_close["q_minus_if_basis_median"],
         "by_month": by_month,
         "by_month_bucket": by_month_bucket,
         "by_bucket": by_bucket,
-        "note": "IF close/settle are the CFFEX fields 今收盘 and 今结算; matched by the IO expiry year-month. Basis is annualized r - ln(IF/S0)/T.",
+        "note": "IF close/settle are the CFFEX fields 今收盘 and 今结算; matched by the IO expiry year-month. Basis is annualized r - ln(IF/S0)/T. implied_q_median/q_minus_if_basis_* use exactly the matched pairs; implied_q_all_median is shown for contrast.",
     }
     return obs, summary
 
