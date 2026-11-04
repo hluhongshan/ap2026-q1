@@ -1,0 +1,266 @@
+{
+  "created_at": "2026-11-04T17:45:18+08:00",
+  "akshare_version": "1.20.25",
+  "artifacts": {
+    "data/clean/options_io.csv": {
+      "path": "data/clean/options_io.csv",
+      "source": "CFFEX IO daily quotes; CSI 300 close from akshare.stock_zh_index_daily",
+      "interface": "http://www.cffex.com.cn/sj/hqsj/rtj/ + akshare index interfaces",
+      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "schema": [
+        "date",
+        "contract",
+        "expiry",
+        "cp",
+        "K",
+        "open",
+        "high",
+        "low",
+        "close",
+        "settle",
+        "volume",
+        "oi",
+        "S"
+      ],
+      "rows": 30068,
+      "sha256": "6b30ee02bdc10decd66ecf8939f84efcebb660be8dd29e310a5cb6632766cc8d"
+    },
+    "data/clean/shibor.csv": {
+      "path": "data/clean/shibor.csv",
+      "source": "China Shibor",
+      "interface": "akshare.macro_china_shibor_all",
+      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "schema": [
+        "date",
+        "ON",
+        "1W",
+        "2W",
+        "1M",
+        "3M",
+        "6M",
+        "9M",
+        "1Y"
+      ],
+      "rows": 2398,
+      "sha256": "2e2618f04eec22f96e31fc2c3c88ad738d3348542dc77cc6f88a4ddc8bb206ef"
+    },
+    "data/clean/sina_comparison.csv": {
+      "path": "data/clean/sina_comparison.csv",
+      "source": "CFFEX close vs Sina option daily close",
+      "interface": "akshare.option_cffex_hs300_daily_sina",
+      "retrieval_time": "2026-11-04T17:45:18+08:00",
+      "schema": [
+        "date",
+        "contract",
+        "sina_symbol",
+        "cffex_close",
+        "sina_close",
+        "diff",
+        "status",
+        "error"
+      ],
+      "rows": 30,
+      "sha256": "f3febf22d1f1e34f2826af8a27b1062118cbb32a563fa5db8a40087fd88ec2a8"
+    }
+  },
+  "interfaces": [
+    {
+      "interface": "CFFEX daily quotes",
+      "status": "ok",
+      "detail": "downloaded=2 skipped=124 non200=2 noncsv200=1 errors=0",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/cffex",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "CSI 300 close",
+      "status": "skipped",
+      "detail": "using cached source=akshare.stock_zh_index_daily",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/csi300.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "Shibor",
+      "status": "skipped",
+      "detail": "cached shibor.csv",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/shibor.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "LPR",
+      "status": "skipped",
+      "detail": "cached lpr.csv",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/lpr.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "SSE option current day",
+      "status": "skipped",
+      "detail": "cached option_current_day_sse.csv",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/option_current_day_sse.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "ETF 510050",
+      "status": "skipped",
+      "detail": "using cached source=akshare.fund_etf_hist_sina",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510050.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "ETF 510300",
+      "status": "skipped",
+      "detail": "using cached source=akshare.fund_etf_hist_sina",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510300.csv",
+      "retrieved_at": "2026-11-04T17:45:17+08:00"
+    },
+    {
+      "interface": "Sina option cross-check",
+      "status": "skipped",
+      "detail": "cached comparison",
+      "path": "/Users/luhao/E-Study/ap2026/data/raw/sina_comparison.csv",
+      "retrieved_at": "2026-11-04T17:45:18+08:00"
+    }
+  ],
+  "csi_source": "akshare.stock_zh_index_daily",
+  "build_stats": {
+    "raw_io_rows": 30444,
+    "ignored_non_io": 66514,
+    "invalid_codes": 0,
+    "dropped_on_or_after_expiry": 376,
+    "expiry_flags": [
+      {
+        "expiry": "2026-06-19",
+        "reason": "not a trading day in CSI 300 data"
+      },
+      {
+        "expiry": "2026-11-20",
+        "reason": "beyond CSI 300 data horizon"
+      },
+      {
+        "expiry": "2026-12-18",
+        "reason": "beyond CSI 300 data horizon"
+      },
+      {
+        "expiry": "2027-03-19",
+        "reason": "beyond CSI 300 data horizon"
+      },
+      {
+        "expiry": "2027-06-18",
+        "reason": "beyond CSI 300 data horizon"
+      },
+      {
+        "expiry": "2027-09-17",
+        "reason": "beyond CSI 300 data horizon"
+      }
+    ]
+  },
+  "sample_dates": [
+    "2024-03-15",
+    "2024-09-13",
+    "2025-03-14",
+    "2025-09-15",
+    "2026-03-16",
+    "2026-09-15"
+  ],
+  "sample_month_report": [
+    {
+      "month": "2024-03",
+      "trading_days": 21,
+      "rows": 4684
+    },
+    {
+      "month": "2024-09",
+      "trading_days": 19,
+      "rows": 3926
+    },
+    {
+      "month": "2025-03",
+      "trading_days": 21,
+      "rows": 5074
+    },
+    {
+      "month": "2025-09",
+      "trading_days": 22,
+      "rows": 6376
+    },
+    {
+      "month": "2026-03",
+      "trading_days": 22,
+      "rows": 5208
+    },
+    {
+      "month": "2026-09",
+      "trading_days": 21,
+      "rows": 4800
+    }
+  ],
+  "sample_date_report": [
+    {
+      "date": "2024-03-15",
+      "rows": 180,
+      "expiries": 5
+    },
+    {
+      "date": "2024-09-13",
+      "rows": 212,
+      "expiries": 6
+    },
+    {
+      "date": "2025-03-14",
+      "rows": 248,
+      "expiries": 6
+    },
+    {
+      "date": "2025-09-15",
+      "rows": 310,
+      "expiries": 6
+    },
+    {
+      "date": "2026-03-16",
+      "rows": 240,
+      "expiries": 6
+    },
+    {
+      "date": "2026-09-15",
+      "rows": 236,
+      "expiries": 6
+    }
+  ],
+  "assertions": [
+    {
+      "name": "no duplicate date+contract",
+      "passed": true,
+      "detail": "duplicates=0"
+    },
+    {
+      "name": "K > 0",
+      "passed": true,
+      "detail": "violations=0"
+    },
+    {
+      "name": "C and P both present",
+      "passed": true,
+      "detail": "date+expiry+K groups without both C and P=0"
+    },
+    {
+      "name": "expiry after date",
+      "passed": true,
+      "detail": "all retained rows have expiry > date"
+    },
+    {
+      "name": "S present on every date",
+      "passed": true,
+      "detail": "rows missing S=0"
+    },
+    {
+      "name": "at least 5 sample dates spanning at least 2 years",
+      "passed": true,
+      "detail": "sample_dates=6 span_days=914"
+    },
+    {
+      "name": "at least 4 expiries per sample date",
+      "passed": true,
+      "detail": "minimum expiries across sample dates=5"
+    }
+  ]
+}
