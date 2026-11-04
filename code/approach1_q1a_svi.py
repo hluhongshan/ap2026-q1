@@ -1,0 +1,1444 @@
+"""Q1 Option A: arbitrage-free SVI implied-volatility surface for CFFEX IO options.
+
+The pipeline is deterministic. It loads CFFEX IO option quotes and SHIBOR,
+estimates the forward from put-call parity, filters liquid quotes, inverts
+Black-Scholes implied volatilities, fits raw SVI slices, audits butterfly and
+calendar no-arbitrage, repairs violations with penalised refits, and writes
+all metrics and figures under ``results/approach1/<out>``.
+
+SVI raw parameterisation
+------------------------
+w(k) = a + b * (rho * (k - m) + sqrt((k - m)^2 + eta^2)),
+with b >= 0, |rho| < 1, eta > 0. Analytic derivatives used in the audits are
+
+    w'(k)  = b * (rho + d / s)
+    w''(k) = b * eta^2 / s^3,  d = k - m, s = sqrt(d^2 + eta^2).
+
+The butterfly function is the correct Gatheral form
+
+    g(k) = (1 - k w'/(2w))^2 - (w'^2/4)(1/w + 1/4) + w''/2.
+
+The brief's printed form omits the w''/2 term; both are reported.
+
+Documented SVI starting points (a is solved so that w(0) = observed w near 0)
+-----------------------------------------------------------------------------
+1. flat ................ b=0.05, rho= 0.00, m= 0.00, eta=0.10
+2. mild negative skew .. b=0.10, rho=-0.50, m= 0.00, eta=0.10
+3. strong negative skew  b=0.20, rho=-0.70, m=-0.05, eta=0.15
+4. steep short wing .... b=0.05, rho=-0.90, m= 0.05, eta=0.05
+5. high curvature ...... b=0.30, rho= 0.00, m= 0.00, eta=0.20
+6. positive skew ....... b=0.15, rho= 0.30, m= 0.00, eta=0.08
+7. wide shallow smile .. b=0.02, rho=-0.30, m=-0.10, eta=0.25
+8. moderate skew ....... b=0.10, rho=-0.50, m=-0.02, eta=0.20
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from scipy.optimize import brentq, least_squares
+from scipy.special import ndtr
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OPTIONS = ROOT / "data" / "clean" / "options_io.csv"
+DEFAULT_SHIBOR = ROOT / "data" / "clean" / "shibor.csv"
+DEFAULT_METADATA = ROOT / "data" / "metadata.json"
+DEFAULT_OUT = ROOT / "results" / "approach1" / "io"
+
+PILLAR_DAYS = {"ON": 1, "1W": 7, "2W": 14, "1M": 30, "3M": 90, "6M": 180, "9M": 270, "1Y": 365}
+GRID_K = np.round(np.arange(-0.14, 0.14 + 0.005, 0.01), 10)
+SURFACE_K = np.round(np.arange(-0.20, 0.20 + 0.01, 0.02), 10)
+SVI_STARTS = (
+    ("flat", 0.05, 0.00, 0.00, 0.10),
+    ("mild_negative_skew", 0.10, -0.50, 0.00, 0.10),
+    ("strong_negative_skew", 0.20, -0.70, -0.05, 0.15),
+    ("steep_short_wing", 0.05, -0.90, 0.05, 0.05),
+    ("high_curvature", 0.30, 0.00, 0.00, 0.20),
+    ("positive_skew", 0.15, 0.30, 0.00, 0.08),
+    ("wide_shallow_smile", 0.02, -0.30, -0.10, 0.25),
+    ("moderate_skew", 0.10, -0.50, -0.02, 0.20),
+)
+SVI_LOWER = np.array([-2.0, 0.0, -0.999, -2.0, 1e-6])
+SVI_UPPER = np.array([2.0, 5.0, 0.999, 2.0, 2.0])
+BUTTERFLY_TOL = 1e-8
+CALENDAR_TOL = 1e-10
+IV_GAP_REPORT = 0.01
+PRICE_TOL = 1e-12
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Q1 Option A: SVI surface on CFFEX IO options")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--price-col", choices=["close", "settle"], default="close")
+    parser.add_argument("--min-volume", type=float, default=10.0)
+    parser.add_argument("--min-price", type=float, default=1.0)
+    parser.add_argument("--kband", type=float, default=0.20)
+    parser.add_argument("--min-days", type=int, default=7)
+    parser.add_argument("--min-strikes", type=int, default=6)
+    parser.add_argument("--options", type=Path, default=DEFAULT_OPTIONS)
+    parser.add_argument("--shibor", type=Path, default=DEFAULT_SHIBOR)
+    parser.add_argument("--metadata", type=Path, default=DEFAULT_METADATA)
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
+    return parser.parse_args(argv)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def to_jsonable(value):
+    if isinstance(value, dict):
+        return {str(key): to_jsonable(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [to_jsonable(val) for val in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        val = float(value)
+        return val if math.isfinite(val) else None
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def load_data(options_path: Path, shibor_path: Path, metadata_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    options = pd.read_csv(options_path, parse_dates=["date", "expiry"])
+    shibor = pd.read_csv(shibor_path, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
+    metadata = json.loads(metadata_path.read_text())
+
+    required_options = {"date", "contract", "expiry", "cp", "K", "open", "high", "low", "close", "settle", "volume", "oi", "S"}
+    required_shibor = {"date", *PILLAR_DAYS.keys()}
+    missing_options = required_options - set(options.columns)
+    missing_shibor = required_shibor - set(shibor.columns)
+    if missing_options:
+        raise ValueError(f"options file missing columns: {sorted(missing_options)}")
+    if missing_shibor:
+        raise ValueError(f"shibor file missing columns: {sorted(missing_shibor)}")
+
+    checks = {
+        "rows": len(options),
+        "duplicate_date_contract": int(options.duplicated(["date", "contract"]).sum()),
+        "nonpositive_K": int((options.K <= 0).sum()),
+        "expiry_not_after_date": int((options.expiry <= options.date).sum()),
+        "missing_quotes": int(options[["close", "settle", "volume", "S"]].isna().sum().sum()),
+    }
+    if any(checks[key] for key in ("duplicate_date_contract", "nonpositive_K", "expiry_not_after_date", "missing_quotes")):
+        raise ValueError(f"data verification failed: {checks}")
+    if options.groupby(["date", "expiry", "K"]).cp.nunique().max() != 2:
+        raise ValueError("some date/expiry/strike groups do not contain both C and P")
+
+    return options, shibor, metadata
+
+
+def build_rate_curves(shibor: pd.DataFrame) -> tuple[pd.DataFrame, dict[pd.Timestamp, tuple[np.ndarray, np.ndarray]]]:
+    taus = np.array([PILLAR_DAYS[name] / 365.0 for name in PILLAR_DAYS], dtype=float)
+    curves: dict[pd.Timestamp, tuple[np.ndarray, np.ndarray]] = {}
+    zero_rows = []
+    for _, row in shibor.iterrows():
+        date = pd.Timestamp(row["date"])
+        levels = np.array([row[name] for name in PILLAR_DAYS], dtype=float)
+        if not np.all(np.isfinite(levels)):
+            continue
+        zeros = np.log1p((levels / 100.0) * taus * (365.0 / 360.0)) / taus
+        curves[date] = (taus, zeros)
+        for name, tau, level, zero in zip(PILLAR_DAYS, taus, levels, zeros):
+            zero_rows.append((date, name, tau, level, zero))
+    return pd.DataFrame(zero_rows, columns=["date", "pillar", "tau", "level_pct", "zero_rate"]), curves
+
+
+def zero_rate(curves: dict[pd.Timestamp, tuple[np.ndarray, np.ndarray]], sorted_dates: np.ndarray, date: pd.Timestamp, T: float) -> tuple[float, pd.Timestamp]:
+    idx = int(np.searchsorted(sorted_dates, np.datetime64(date), side="right") - 1)
+    if idx < 0:
+        idx = 0
+    curve_date = pd.Timestamp(sorted_dates[idx])
+    taus, zeros = curves[curve_date]
+    return float(np.interp(T, taus, zeros)), curve_date
+
+
+def estimate_forward_pair(
+    K: np.ndarray,
+    C: np.ndarray,
+    P: np.ndarray,
+    vol_c: np.ndarray,
+    vol_p: np.ndarray,
+    DF: float,
+    S0: float,
+    r: float,
+    T: float,
+    band: float = 0.05,
+) -> dict:
+    Fk = K + (C - P) / DF
+    positive = np.isfinite(Fk) & (Fk > 0)
+    if not np.any(positive):
+        F = S0 / DF
+        return {
+            "F": float(F),
+            "F_median": float(F),
+            "Fk": Fk,
+            "in_band": np.zeros_like(Fk, dtype=bool),
+            "fallback": True,
+            "resid_S0": C - P - (S0 - K * np.exp(-r * T)),
+            "resid_F": C - P - DF * (F - K),
+        }
+    median_f = float(np.median(Fk[positive]))
+    in_band = positive & (np.abs(np.log(Fk / median_f)) <= band)
+    weights = np.maximum(vol_c + vol_p, 0.0)
+    if np.sum(weights[in_band]) > 0:
+        F = float(np.sum(weights[in_band] * Fk[in_band]) / np.sum(weights[in_band]))
+    else:
+        F = float(np.mean(Fk[in_band]))
+    return {
+        "F": F,
+        "F_median": median_f,
+        "Fk": Fk,
+        "in_band": in_band,
+        "fallback": False,
+        "resid_S0": C - P - (S0 - K * np.exp(-r * T)),
+        "resid_F": C - P - DF * (F - K),
+    }
+
+
+def estimate_forwards(options: pd.DataFrame, shibor: pd.DataFrame, price_col: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    zero_df, curves = build_rate_curves(shibor)
+    sorted_dates = zero_df.date.drop_duplicates().sort_values().to_numpy()
+    forward_rows = []
+    pair_rows = []
+    for (date, expiry), group in options.groupby(["date", "expiry"], sort=True):
+        T = (expiry - date).days / 365.0
+        r, curve_date = zero_rate(curves, sorted_dates, date, T)
+        DF = math.exp(-r * T)
+        S0 = float(group.S.iloc[0])
+        piv = group.pivot_table(index="K", columns="cp", values=price_col, aggfunc="first")
+        vols = group.pivot_table(index="K", columns="cp", values="volume", aggfunc="first")
+        if "C" not in piv.columns or "P" not in piv.columns:
+            continue
+        pair = piv[["C", "P"]].copy()
+        pair["C_vol"] = vols["C"]
+        pair["P_vol"] = vols["P"]
+        pair = pair.dropna()
+        if pair.empty:
+            continue
+        K = pair.index.to_numpy(dtype=float)
+        C = pair["C"].to_numpy(dtype=float)
+        P = pair["P"].to_numpy(dtype=float)
+        vol_c = pair["C_vol"].to_numpy(dtype=float) if "C_vol" in pair.columns else pair["C"].to_numpy(dtype=float) * 0.0
+        vol_p = pair["P_vol"].to_numpy(dtype=float) if "P_vol" in pair.columns else pair["P"].to_numpy(dtype=float) * 0.0
+        est = estimate_forward_pair(K, C, P, vol_c, vol_p, DF, S0, r, T)
+        q = r - math.log(est["F"] / S0) / T
+        forward_rows.append({
+            "date": date,
+            "expiry": expiry,
+            "T": T,
+            "days": int((expiry - date).days),
+            "r": r,
+            "curve_date": curve_date,
+            "DF": DF,
+            "S0": S0,
+            "F": est["F"],
+            "F_median": est["F_median"],
+            "q": q,
+            "n_pairs": len(pair),
+            "n_in_band": int(est["in_band"].sum()),
+            "fallback_F": est["fallback"],
+        })
+        for i, k_value in enumerate(K):
+            pair_rows.append({
+                "date": date,
+                "expiry": expiry,
+                "K": k_value,
+                "C": C[i],
+                "P": P[i],
+                "volume_C": vol_c[i],
+                "volume_P": vol_p[i],
+                "F_K": est["Fk"][i],
+                "in_band": bool(est["in_band"][i]),
+                "resid_S0": est["resid_S0"][i],
+                "resid_F": est["resid_F"][i],
+                "F": est["F"],
+                "T": T,
+                "r": r,
+                "DF": DF,
+                "S0": S0,
+                "q": q,
+            })
+    return pd.DataFrame(forward_rows), pd.DataFrame(pair_rows)
+
+
+def apply_filters(options: pd.DataFrame, forwards: pd.DataFrame, args: argparse.Namespace) -> tuple[pd.DataFrame, dict]:
+    data = options.merge(forwards[["date", "expiry", "T", "days", "r", "DF", "S0", "F", "q"]], on=["date", "expiry"], how="left")
+    if data[["F", "T", "DF"]].isna().any().any():
+        raise ValueError("forward estimate missing for some option rows")
+    data["price"] = data[args.price_col]
+    data["k"] = np.log(data.K / data.F)
+    data["pass_volume"] = data.volume >= args.min_volume
+    data["pass_price"] = data.price >= args.min_price
+    data["pass_kband"] = np.abs(data.k) <= args.kband
+    data["pass_days"] = data.days >= args.min_days
+    flags = ["pass_volume", "pass_price", "pass_kband", "pass_days"]
+    data["liquid"] = data[flags].all(axis=1)
+
+    independent = {name: int((~data[name]).sum()) for name in flags}
+    sequential: dict[str, int] = {}
+    remaining = np.ones(len(data), dtype=bool)
+    for name in flags:
+        removed = int((~data[name] & remaining).sum())
+        sequential[name] = removed
+        remaining &= data[name].to_numpy()
+    counts = {
+        "quotes_total": int(len(data)),
+        "quotes_liquid": int(data.liquid.sum()),
+        "independent_removals": independent,
+        "sequential_removals": sequential,
+        "date_expiry_groups_total": int(data.groupby(["date", "expiry"]).ngroups),
+        "date_expiry_groups_liquid": int(data[data.liquid].groupby(["date", "expiry"]).ngroups),
+    }
+    return data, counts
+
+
+def bs_price(cp: str, F: float, K: float, T: float, DF: float, sigma: float) -> float:
+    if sigma <= 0 or T <= 0 or K <= 0 or F <= 0:
+        return float("nan")
+    vol_sqrt_t = sigma * math.sqrt(T)
+    d1 = (math.log(F / K) + 0.5 * vol_sqrt_t * vol_sqrt_t) / vol_sqrt_t
+    d2 = d1 - vol_sqrt_t
+    if cp == "C":
+        return float(DF * (F * ndtr(d1) - K * ndtr(d2)))
+    return float(DF * (K * ndtr(-d2) - F * ndtr(-d1)))
+
+
+def implied_vol(price: float, cp: str, F: float, K: float, T: float, DF: float) -> tuple[float, str]:
+    if not np.isfinite(price) or price <= 0:
+        return float("nan"), "below_intrinsic"
+    if cp == "C":
+        intrinsic = DF * max(F - K, 0.0)
+        upper = DF * F
+    else:
+        intrinsic = DF * max(K - F, 0.0)
+        upper = DF * K
+    scale = max(1.0, abs(F), abs(K))
+    if price <= intrinsic + PRICE_TOL * scale:
+        return float("nan"), "below_intrinsic"
+    if price >= upper - PRICE_TOL * scale:
+        return float("nan"), "above_upper_bound"
+
+    def objective(sigma: float) -> float:
+        return bs_price(cp, F, K, T, DF, sigma) - price
+
+    low, high = 1e-4, 5.0
+    try:
+        f_low = objective(low)
+        f_high = objective(high)
+        if f_low > 0:
+            return float("nan"), "below_intrinsic"
+        if f_high < 0:
+            return float("nan"), "above_upper_bound"
+        sigma = brentq(objective, low, high, xtol=1e-13, rtol=1e-13, maxiter=200)
+        if not np.isfinite(sigma):
+            return float("nan"), "brentq_failed"
+        return float(sigma), "ok"
+    except (ValueError, RuntimeError):
+        return float("nan"), "brentq_failed"
+
+
+def compute_implied_vols(liquid: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    rows = []
+    for row in liquid.itertuples(index=False):
+        sigma, status = implied_vol(row.price, row.cp, row.F, row.K, row.T, row.DF)
+        rows.append({
+            "date": row.date,
+            "expiry": row.expiry,
+            "K": row.K,
+            "cp": row.cp,
+            "price": row.price,
+            "volume": row.volume,
+            "F": row.F,
+            "T": row.T,
+            "DF": row.DF,
+            "k": row.k,
+            "iv": sigma,
+            "status": status,
+        })
+    iv = pd.DataFrame(rows)
+    calls = iv[iv.cp == "C"][["date", "expiry", "K", "iv", "status", "volume", "F", "T", "DF", "k"]].rename(
+        columns={"iv": "iv_c", "status": "status_c", "volume": "volume_c", "k": "k_c"}
+    )
+    puts = iv[iv.cp == "P"][["date", "expiry", "K", "iv", "status", "volume", "k"]].rename(
+        columns={"iv": "iv_p", "status": "status_p", "volume": "volume_p", "k": "k_p"}
+    )
+    pairs = calls.merge(puts, on=["date", "expiry", "K"], how="outer")
+    pairs["iv_gap"] = pairs.iv_c - pairs.iv_p
+    failure_states = {"below_intrinsic", "above_upper_bound", "brentq_failed"}
+    failure_mask = pairs.status_c.isin(failure_states) | pairs.status_p.isin(failure_states)
+    gap_mask = (pairs.status_c == "ok") & (pairs.status_p == "ok") & (pairs.iv_gap.abs() > IV_GAP_REPORT)
+    divergence = pairs[failure_mask | gap_mask].copy()
+    divergence_failure = divergence.status_c.isin(failure_states) | divergence.status_p.isin(failure_states)
+    divergence_gap = (
+        (divergence.status_c == "ok")
+        & (divergence.status_p == "ok")
+        & (divergence.iv_gap.abs() > IV_GAP_REPORT)
+    )
+    divergence["reason"] = np.where(
+        divergence_failure,
+        "iv_failure",
+        np.where(divergence_gap, "call_put_gap", "other"),
+    )
+    status_counts = {}
+    for cp in ("C", "P"):
+        subset = iv[iv.cp == cp]
+        status_counts[cp] = {str(key): int(val) for key, val in subset.status.value_counts().items()}
+    both = pairs[(pairs.status_c == "ok") & (pairs.status_p == "ok")].copy()
+    gap_stats = {
+        "attempted_quotes": int(len(iv)),
+        "ok_quotes": int((iv.status == "ok").sum()),
+        "status_counts": status_counts,
+        "paired_strikes": int(len(pairs)),
+        "gap_available": int(len(both)),
+        "gap_median": float(both.iv_gap.median()) if len(both) else float("nan"),
+        "gap_mean": float(both.iv_gap.mean()) if len(both) else float("nan"),
+        "gap_p95_abs": float(both.iv_gap.abs().quantile(0.95)) if len(both) else float("nan"),
+        "gap_max_abs": float(both.iv_gap.abs().max()) if len(both) else float("nan"),
+        "n_gap_gt_0_01": int((both.iv_gap.abs() > 0.01).sum()),
+        "n_gap_gt_0_05": int((both.iv_gap.abs() > 0.05).sum()),
+    }
+    return iv, divergence, gap_stats
+
+
+def svi_w(k: np.ndarray | float, params: np.ndarray) -> np.ndarray:
+    a, b, rho, m, eta = params
+    d = np.asarray(k) - m
+    return a + b * (rho * d + np.sqrt(d * d + eta * eta))
+
+
+def svi_g(k: np.ndarray, params: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    a, b, rho, m, eta = params
+    k = np.asarray(k, dtype=float)
+    d = k - m
+    s = np.sqrt(d * d + eta * eta)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        w = a + b * (rho * d + s)
+        w1 = b * (rho + d / s)
+        w2 = b * eta * eta / (s * s * s)
+        g = (1.0 - k * w1 / (2.0 * w)) ** 2 - (w1 * w1 / 4.0) * (1.0 / w + 1.0 / 4.0) + w2 / 2.0
+        g_printed = (1.0 - k * w1 / (2.0 * w)) ** 2 - (w1 * w1 / 4.0) * (1.0 / w + 1.0 / 4.0)
+    return w, w1, w2, g, g_printed
+
+
+def _start_params(w0: float, b: float, rho: float, m: float, eta: float) -> np.ndarray:
+    a = w0 - b * (rho * (0.0 - m) + math.sqrt(m * m + eta * eta))
+    return np.array([a, b, rho, m, eta], dtype=float)
+
+
+def build_starting_points(k: np.ndarray, w: np.ndarray) -> list[tuple[str, np.ndarray]]:
+    w0 = float(w[int(np.argmin(np.abs(k)))])
+    starts = []
+    for label, b, rho, m, eta in SVI_STARTS:
+        params = _start_params(w0, b, rho, m, eta)
+        starts.append((label, params))
+    return starts
+
+
+def fit_svi(
+    k: np.ndarray,
+    w: np.ndarray,
+    k_grid: np.ndarray | None = None,
+    penalty=None,
+    x0_params: np.ndarray | None = None,
+    include_starts: bool = True,
+) -> dict | None:
+    starts: list[tuple[str, np.ndarray]] = []
+    if x0_params is not None:
+        starts.append(("warm_start", np.asarray(x0_params, dtype=float)))
+    if include_starts:
+        starts.extend(build_starting_points(k, w))
+
+    def objective(params: np.ndarray) -> np.ndarray:
+        residual = svi_w(k, params) - w
+        if penalty is None:
+            return residual
+        return np.concatenate([residual, penalty(params, k_grid)])
+
+    best = None
+    for label, x0 in starts:
+        x0 = np.clip(x0, SVI_LOWER + 1e-10, SVI_UPPER - 1e-10)
+        try:
+            sol = least_squares(
+                objective,
+                x0,
+                bounds=(SVI_LOWER, SVI_UPPER),
+                method="trf",
+                x_scale="jac",
+                max_nfev=4000,
+                ftol=1e-12,
+                xtol=1e-12,
+                gtol=1e-12,
+            )
+        except (ValueError, FloatingPointError, np.linalg.LinAlgError):
+            continue
+        params = np.asarray(sol.x, dtype=float)
+        rmse = float(np.sqrt(np.mean((svi_w(k, params) - w) ** 2)))
+        candidate = {
+            "params": params,
+            "cost": float(sol.cost),
+            "rmse": rmse,
+            "nfev": int(sol.nfev),
+            "success": bool(sol.success),
+            "start": label,
+            "message": str(sol.message),
+        }
+        if best is None or candidate["cost"] < best["cost"]:
+            best = candidate
+    return best
+
+
+def audit_svi(params: np.ndarray, k_grid: np.ndarray, tol: float = BUTTERFLY_TOL) -> pd.DataFrame:
+    w, w1, w2, g, g_printed = svi_g(k_grid, params)
+    return pd.DataFrame({
+        "k": k_grid,
+        "w": w,
+        "w1": w1,
+        "w2": w2,
+        "g": g,
+        "g_printed": g_printed,
+        "w_nonpositive": ~(w > 0),
+        "violates_correct": np.isfinite(g) & (g < -tol),
+        "violates_printed": np.isfinite(g_printed) & (g_printed < -tol),
+    })
+
+
+def audit_summary(audit: pd.DataFrame) -> dict:
+    return {
+        "butterfly_violations_correct": int(audit.violates_correct.sum()),
+        "butterfly_violations_printed": int(audit.violates_printed.sum()),
+        "w_nonpositive": int(audit.w_nonpositive.sum()),
+        "min_g": float(audit.g.min()) if np.isfinite(audit.g).any() else float("nan"),
+        "min_w": float(audit.w.min()) if np.isfinite(audit.w).any() else float("nan"),
+    }
+
+
+def penalty_residual(
+    params: np.ndarray,
+    k_grid: np.ndarray,
+    butterfly_weight: float,
+    w_weight: float = 1e4,
+    prev_w: np.ndarray | None = None,
+    calendar_weight: float = 0.0,
+) -> np.ndarray:
+    w, _, _, g, _ = svi_g(k_grid, params)
+    g_safe = np.nan_to_num(g, nan=0.0, posinf=0.0, neginf=0.0)
+    butterfly_penalty = np.sqrt(butterfly_weight) * np.maximum(0.0, -g_safe)
+    w_penalty = np.sqrt(w_weight) * np.maximum(0.0, 1e-8 - np.nan_to_num(w, nan=-1.0, posinf=0.0, neginf=-1.0))
+    pieces = [butterfly_penalty, w_penalty]
+    if prev_w is not None and calendar_weight > 0:
+        calendar_penalty = np.sqrt(calendar_weight) * np.maximum(0.0, prev_w - np.nan_to_num(w, nan=-1.0, posinf=0.0, neginf=-1.0))
+        pieces.append(calendar_penalty)
+    return np.concatenate(pieces)
+
+
+def fit_constraint_score(params: np.ndarray, k: np.ndarray, w: np.ndarray, prev_w: np.ndarray | None = None) -> tuple:
+    audit = audit_svi(params, GRID_K)
+    n_bf = int(audit.violates_correct.sum())
+    n_w = int(audit.w_nonpositive.sum())
+    n_cal = int((prev_w - svi_w(GRID_K, params) > CALENDAR_TOL).sum()) if prev_w is not None else 0
+    max_bf = float(max(0.0, -audit.g[audit.violates_correct].min())) if n_bf else 0.0
+    max_cal = float(max(0.0, (prev_w - svi_w(GRID_K, params)).max())) if prev_w is not None else 0.0
+    rmse = float(np.sqrt(np.mean((svi_w(k, params) - w) ** 2)))
+    return (n_bf + n_w + n_cal, n_bf + n_w + n_cal, max_bf + max_cal, rmse)
+
+
+def repair_svi(
+    k: np.ndarray,
+    w: np.ndarray,
+    raw_params: np.ndarray,
+    current_params: np.ndarray,
+    prev_w: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict]:
+    best_params = np.asarray(current_params, dtype=float)
+    best_score = fit_constraint_score(best_params, k, w, prev_w)
+    levels = (1e2, 1e4, 1e6)
+    attempts = 0
+    for level in levels:
+        starts = [best_params, np.asarray(raw_params, dtype=float)]
+        for start in starts:
+            def penalty(params, grid, level=level, prev_w=prev_w):
+                return penalty_residual(
+                    params,
+                    grid,
+                    butterfly_weight=level,
+                    w_weight=level,
+                    prev_w=prev_w,
+                    calendar_weight=level if prev_w is not None else 0.0,
+                )
+            candidate = fit_svi(k, w, k_grid=GRID_K, penalty=penalty, x0_params=start, include_starts=False)
+            attempts += 1
+            if candidate is None:
+                continue
+            score = fit_constraint_score(candidate["params"], k, w, prev_w)
+            if score < best_score:
+                best_score = score
+                best_params = candidate["params"]
+        if best_score[0] == 0:
+            break
+    return best_params, {
+        "attempts": attempts,
+        "feasible": bool(best_score[0] == 0),
+        "remaining_constraint_count": int(best_score[0]),
+        "max_violation": float(best_score[2]),
+        "rmse": float(np.sqrt(np.mean((svi_w(k, best_params) - w) ** 2))),
+    }
+
+
+def make_fits(
+    forwards: pd.DataFrame,
+    data: pd.DataFrame,
+    iv: pd.DataFrame,
+    min_strikes: int,
+) -> tuple[dict, pd.DataFrame, dict]:
+    from collections import Counter
+
+    fit_input_rows = []
+    for row in data[data.liquid].itertuples(index=False):
+        if row.cp == "C" and row.K >= row.F:
+            fit_input_rows.append(row)
+        elif row.cp == "P" and row.K < row.F:
+            fit_input_rows.append(row)
+    otm = pd.DataFrame([{
+        "date": row.date,
+        "expiry": row.expiry,
+        "K": row.K,
+        "cp": row.cp,
+        "price": row.price,
+        "volume": row.volume,
+        "k": row.k,
+        "F": row.F,
+        "T": row.T,
+    } for row in fit_input_rows])
+    if otm.empty:
+        raise ValueError("no OTM liquid quotes after filtering")
+    otm = otm.merge(iv[["date", "expiry", "K", "cp", "iv", "status"]], on=["date", "expiry", "K", "cp"], how="left")
+    otm = otm[(otm.status == "ok") & np.isfinite(otm.iv) & (otm.iv > 0)].copy()
+    otm["w"] = otm.iv ** 2 * otm["T"]
+    otm = otm.sort_values(["date", "expiry", "K", "cp"]).drop_duplicates(["date", "expiry", "K"], keep="first")
+
+    fwd_map = forwards.set_index(["date", "expiry"])
+    fits: dict[tuple[str, str], dict] = {}
+    skipped = []
+    for (date, expiry), group in otm.groupby(["date", "expiry"], sort=True):
+        key = (date.strftime("%Y-%m-%d"), expiry.strftime("%Y-%m-%d"))
+        fwd = fwd_map.loc[(date, expiry)]
+        if len(group) < min_strikes:
+            skipped.append({
+                "date": key[0],
+                "expiry": key[1],
+                "n_strikes": int(len(group)),
+                "reason": "fewer_than_min_strikes",
+                "T": float(fwd["T"]),
+                "F": float(fwd["F"]),
+            })
+            continue
+        k = group.k.to_numpy(dtype=float)
+        w = group.w.to_numpy(dtype=float)
+        raw = fit_svi(k, w)
+        if raw is None:
+            skipped.append({
+                "date": key[0],
+                "expiry": key[1],
+                "n_strikes": int(len(group)),
+                "reason": "raw_fit_failed",
+                "T": float(fwd["T"]),
+                "F": float(fwd["F"]),
+            })
+            continue
+        raw_audit = audit_svi(raw["params"], GRID_K)
+        fits[key] = {
+            "date": key[0],
+            "expiry": key[1],
+            "T": float(fwd["T"]),
+            "F": float(fwd["F"]),
+            "DF": float(fwd["DF"]),
+            "S0": float(fwd["S0"]),
+            "q": float(fwd["q"]),
+            "k": k,
+            "w": w,
+            "iv": group.iv.to_numpy(dtype=float),
+            "n_strikes": int(len(group)),
+            "raw": raw,
+            "raw_audit_frame": raw_audit,
+            "raw_audit": audit_summary(raw_audit),
+            "repaired": None,
+            "repaired_audit_frame": None,
+            "repaired_audit": None,
+            "repair_info": None,
+            "calendar_repair_info": None,
+        }
+
+    present_keys = {(date.strftime("%Y-%m-%d"), expiry.strftime("%Y-%m-%d")) for date, expiry in otm[["date", "expiry"]].drop_duplicates().itertuples(index=False)}
+    for (date, expiry) in forwards[["date", "expiry"]].itertuples(index=False):
+        key = (date.strftime("%Y-%m-%d"), expiry.strftime("%Y-%m-%d"))
+        if key in present_keys:
+            continue
+        fwd = fwd_map.loc[(date, expiry)]
+        skipped.append({
+            "date": key[0],
+            "expiry": key[1],
+            "n_strikes": 0,
+            "reason": "no_otm_liquid_quotes",
+            "T": float(fwd["T"]),
+            "F": float(fwd["F"]),
+        })
+    skip_reasons = dict(Counter(item["reason"] for item in skipped))
+
+    repair_history = []
+    for key, fit in fits.items():
+        raw_params = fit["raw"]["params"]
+        raw_audit = fit["raw_audit"]
+        needs_repair = raw_audit["butterfly_violations_correct"] > 0 or raw_audit["w_nonpositive"] > 0
+        if needs_repair:
+            repaired_params, info = repair_svi(fit["k"], fit["w"], raw_params, raw_params, prev_w=None)
+            fit["repair_info"] = info
+        else:
+            repaired_params = raw_params
+            fit["repair_info"] = {
+                "attempts": 0,
+                "feasible": True,
+                "remaining_constraint_count": 0,
+                "max_violation": 0.0,
+                "rmse": fit["raw"]["rmse"],
+            }
+        repaired_audit = audit_svi(repaired_params, GRID_K)
+        fit["repaired"] = {
+            "params": repaired_params,
+            "rmse": float(np.sqrt(np.mean((svi_w(fit["k"], repaired_params) - fit["w"]) ** 2))),
+            "nfev": fit["raw"]["nfev"] if not needs_repair else 0,
+            "success": True,
+            "start": "raw" if not needs_repair else "penalised_warm_start",
+            "message": "unchanged" if not needs_repair else "penalised_refit",
+        }
+        fit["repaired_audit_frame"] = repaired_audit
+        fit["repaired_audit"] = audit_summary(repaired_audit)
+        repair_history.append({
+            "date": fit["date"],
+            "expiry": fit["expiry"],
+            "needed_repair": bool(needs_repair),
+            "raw_butterfly": raw_audit["butterfly_violations_correct"],
+            "raw_w_nonpositive": raw_audit["w_nonpositive"],
+            "repaired_butterfly": fit["repaired_audit"]["butterfly_violations_correct"],
+            "repaired_w_nonpositive": fit["repaired_audit"]["w_nonpositive"],
+            **fit["repair_info"],
+        })
+
+    by_date: dict[str, list[tuple[str, str]]] = {}
+    for key in fits:
+        by_date.setdefault(key[0], []).append(key)
+    calendar_history = []
+    for date, keys in sorted(by_date.items()):
+        keys.sort(key=lambda item: fits[item]["T"])
+        for _pass in range(2):
+            changed = False
+            prev_fit = fits[keys[0]]
+            prev_w = svi_w(GRID_K, prev_fit["repaired"]["params"])
+            for key in keys[1:]:
+                fit = fits[key]
+                current_w = svi_w(GRID_K, fit["repaired"]["params"])
+                violations = int((prev_w - current_w > CALENDAR_TOL).sum())
+                if violations > 0:
+                    raw_params = fit["raw"]["params"]
+                    current_params = fit["repaired"]["params"]
+                    calibrated_params, info = repair_svi(fit["k"], fit["w"], raw_params, current_params, prev_w=prev_w)
+                    old_rmse = fit["repaired"]["rmse"]
+                    fit["repaired"] = {
+                        "params": calibrated_params,
+                        "rmse": float(np.sqrt(np.mean((svi_w(fit["k"], calibrated_params) - fit["w"]) ** 2))),
+                        "nfev": 0,
+                        "success": True,
+                        "start": "calendar_penalised_warm_start",
+                        "message": "calendar_penalised_refit",
+                    }
+                    fit["repaired_audit_frame"] = audit_svi(calibrated_params, GRID_K)
+                    fit["repaired_audit"] = audit_summary(fit["repaired_audit_frame"])
+                    fit["calendar_repair_info"] = {
+                        "date": date,
+                        "expiry": key[1],
+                        "previous_expiry": prev_fit["expiry"],
+                        "violations_before": violations,
+                        "violations_after": int((prev_w - svi_w(GRID_K, calibrated_params) > CALENDAR_TOL).sum()),
+                        "rmse_before": old_rmse,
+                        "rmse_after": fit["repaired"]["rmse"],
+                        **info,
+                    }
+                    calendar_history.append(fit["calendar_repair_info"])
+                    changed = True
+                prev_fit = fit
+                prev_w = svi_w(GRID_K, fit["repaired"]["params"])
+            if not changed:
+                break
+
+    raw_repaired_params = pd.DataFrame([{
+        "date": f["date"],
+        "expiry": f["expiry"],
+        "T": f["T"],
+        "F": f["F"],
+        "n_strikes": f["n_strikes"],
+        "a_raw": f["raw"]["params"][0],
+        "b_raw": f["raw"]["params"][1],
+        "rho_raw": f["raw"]["params"][2],
+        "m_raw": f["raw"]["params"][3],
+        "eta_raw": f["raw"]["params"][4],
+        "rmse_raw": f["raw"]["rmse"],
+        "start_raw": f["raw"]["start"],
+        "nfev_raw": f["raw"]["nfev"],
+        "a_repaired": f["repaired"]["params"][0],
+        "b_repaired": f["repaired"]["params"][1],
+        "rho_repaired": f["repaired"]["params"][2],
+        "m_repaired": f["repaired"]["params"][3],
+        "eta_repaired": f["repaired"]["params"][4],
+        "rmse_repaired": f["repaired"]["rmse"],
+        "repair_attempts": f["repair_info"]["attempts"],
+        "repair_feasible": f["repair_info"]["feasible"],
+        "calendar_refit": bool(f["calendar_repair_info"] is not None),
+    } for f in fits.values()])
+    raw_repaired_params = raw_repaired_params.sort_values(["date", "T"]).reset_index(drop=True)
+    history = {
+        "repair": repair_history,
+        "calendar_repair": calendar_history,
+        "skipped": skipped,
+        "skip_reasons": skip_reasons,
+        "otm_counts": {
+            "otm_quotes_used": int(len(otm)),
+            "fits": int(len(fits)),
+            "skipped": int(len(skipped)),
+        },
+    }
+    return fits, raw_repaired_params, history
+
+
+def butterfly_rows(fits: dict, stage: str) -> pd.DataFrame:
+    rows = []
+    for fit in fits.values():
+        frame = fit[f"{stage}_audit_frame"].copy()
+        frame.insert(0, "stage", stage)
+        frame.insert(1, "date", fit["date"])
+        frame.insert(2, "expiry", fit["expiry"])
+        frame.insert(3, "T", fit["T"])
+        frame["F"] = fit["F"]
+        rows.append(frame)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def calendar_rows(fits: dict, stage: str) -> pd.DataFrame:
+    rows = []
+    by_date: dict[str, list[dict]] = {}
+    for fit in fits.values():
+        by_date.setdefault(fit["date"], []).append(fit)
+    for date, items in sorted(by_date.items()):
+        items.sort(key=lambda item: item["T"])
+        for left, right in zip(items[:-1], items[1:]):
+            w1 = svi_w(GRID_K, left[f"{stage}"]["params"])
+            w2 = svi_w(GRID_K, right[f"{stage}"]["params"])
+            forward_var = (w2 - w1) / (right["T"] - left["T"])
+            rows.append(pd.DataFrame({
+                "stage": stage,
+                "date": date,
+                "expiry_1": left["expiry"],
+                "expiry_2": right["expiry"],
+                "T_1": left["T"],
+                "T_2": right["T"],
+                "k": GRID_K,
+                "w_1": w1,
+                "w_2": w2,
+                "forward_variance": forward_var,
+                "violates_calendar": w2 < w1 - CALENDAR_TOL,
+            }))
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def calendar_summary(frame: pd.DataFrame) -> dict:
+    if frame.empty:
+        return {"checks": 0, "violations": 0, "min_forward_variance": float("nan")}
+    violations = frame[frame.violates_calendar]
+    return {
+        "checks": int(len(frame)),
+        "violations": int(frame.violates_calendar.sum()),
+        "min_forward_variance": float(frame.forward_variance.min()),
+        "locations": int(len(violations)),
+    }
+
+
+def repricing_for_stage(fits: dict, liquid: pd.DataFrame, stage: str) -> tuple[pd.DataFrame, dict]:
+    quotes = liquid[liquid.cp == "C"][["date", "expiry", "K", "price", "volume"]].rename(columns={"price": "C_mkt"})
+    quotes["date"] = quotes["date"].dt.strftime("%Y-%m-%d")
+    quotes["expiry"] = quotes["expiry"].dt.strftime("%Y-%m-%d")
+    quotes = quotes.merge(
+        pd.DataFrame([{
+            "date": f["date"],
+            "expiry": f["expiry"],
+            "F": f["F"],
+            "T": f["T"],
+            "DF": f["DF"],
+        } for f in fits.values()]),
+        on=["date", "expiry"],
+        how="inner",
+    )
+    quotes = quotes[(quotes.C_mkt > 0) & np.isfinite(quotes.C_mkt)].copy()
+    quotes["k"] = np.log(quotes.K / quotes.F)
+    rows = []
+    for (date, expiry), group in quotes.groupby(["date", "expiry"], sort=True):
+        key = (date, expiry)
+        if key not in fits:
+            continue
+        fit = fits[key]
+        params = fit[stage]["params"]
+        w = svi_w(group.k.to_numpy(dtype=float), params)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            iv = np.sqrt(w / fit["T"])
+        model = np.array([bs_price("C", fit["F"], K, fit["T"], fit["DF"], sigma) for K, sigma in zip(group.K, iv)])
+        market = group.C_mkt.to_numpy(dtype=float)
+        valid = np.isfinite(model) & np.isfinite(iv) & (market > 0)
+        if not np.any(valid):
+            rows.append({
+                "stage": stage,
+                "date": fit["date"],
+                "expiry": fit["expiry"],
+                "n_strikes": 0,
+                "max_rel_error": np.nan,
+                "median_rel_error": np.nan,
+                "worst_K": np.nan,
+                "fit_rmse": fit[stage]["rmse"],
+            })
+            continue
+        rel = np.abs(model[valid] - market[valid]) / market[valid]
+        K_valid = group.K.to_numpy(dtype=float)[valid]
+        rows.append({
+            "stage": stage,
+            "date": fit["date"],
+            "expiry": fit["expiry"],
+            "n_strikes": int(valid.sum()),
+            "max_rel_error": float(np.max(rel)),
+            "median_rel_error": float(np.median(rel)),
+            "worst_K": float(K_valid[int(np.argmax(rel))]),
+            "fit_rmse": fit[stage]["rmse"],
+        })
+    frame = pd.DataFrame(rows)
+    summary = {
+        "fits": int(len(frame)),
+        "per_fit_max_median": float(frame.max_rel_error.median()) if len(frame) else float("nan"),
+        "per_fit_max_p95": float(frame.max_rel_error.quantile(0.95)) if len(frame) else float("nan"),
+        "per_fit_median_median": float(frame.median_rel_error.median()) if len(frame) else float("nan"),
+        "per_fit_median_p95": float(frame.median_rel_error.quantile(0.95)) if len(frame) else float("nan"),
+        "worst_fit_max": float(frame.max_rel_error.max()) if len(frame) else float("nan"),
+    }
+    return frame, summary
+
+
+def surface_frames(fits: dict, stage: str) -> pd.DataFrame:
+    rows = []
+    for fit in fits.values():
+        params = fit[stage]["params"]
+        w = svi_w(SURFACE_K, params)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            iv = np.sqrt(w / fit["T"])
+        rows.append(pd.DataFrame({
+            "date": fit["date"],
+            "expiry": fit["expiry"],
+            "T": fit["T"],
+            "F": fit["F"],
+            "k": SURFACE_K,
+            "w": w,
+            "iv": iv,
+            "stage": stage,
+        }))
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def term_structure_rows(fits: dict) -> pd.DataFrame:
+    rows = []
+    by_date: dict[str, list[dict]] = {}
+    for fit in fits.values():
+        by_date.setdefault(fit["date"], []).append(fit)
+    k_grid = np.round(np.arange(-0.14, 0.14 + 0.005, 0.02), 10)
+    for date, items in sorted(by_date.items()):
+        items.sort(key=lambda item: item["T"])
+        if len(items) < 2:
+            continue
+        Ts = np.array([item["T"] for item in items])
+        query_T = (Ts[:-1] + Ts[1:]) / 2.0
+        for k in k_grid:
+            ws = np.array([float(svi_w(k, item["repaired"]["params"])) for item in items])
+            interp = np.interp(query_T, Ts, ws)
+            rows.append(pd.DataFrame({
+                "date": date,
+                "k": k,
+                "T_query": query_T,
+                "w_interp": interp,
+                "method": "linear_in_total_variance_at_fixed_k",
+            }))
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def calibration_by_date(fits: dict, data: pd.DataFrame, butterfly_raw: pd.DataFrame, butterfly_rep: pd.DataFrame, calendar_raw: pd.DataFrame, calendar_rep: pd.DataFrame, repricing_raw: pd.DataFrame, repricing_rep: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for date, group in data.groupby("date", sort=True):
+        date_str = date.strftime("%Y-%m-%d")
+        date_fits = [fit for fit in fits.values() if fit["date"] == date_str]
+        bf_raw = butterfly_raw[(butterfly_raw.date == date_str) & butterfly_raw.violates_correct]
+        bf_rep = butterfly_rep[(butterfly_rep.date == date_str) & butterfly_rep.violates_correct]
+        cal_raw = calendar_raw[(calendar_raw.date == date_str) & calendar_raw.violates_calendar]
+        cal_rep = calendar_rep[(calendar_rep.date == date_str) & calendar_rep.violates_calendar]
+        rp_raw = repricing_raw[repricing_raw.date == date_str]
+        rp_rep = repricing_rep[repricing_rep.date == date_str]
+        qs = [fit["q"] for fit in date_fits]
+        rows.append({
+            "date": date_str,
+            "month": date.strftime("%Y-%m"),
+            "n_expiries": int(group.groupby("expiry").ngroups),
+            "n_fits": int(len(date_fits)),
+            "n_skipped": int(group.groupby("expiry").ngroups - len(date_fits)),
+            "quotes_total": int(len(group)),
+            "quotes_liquid": int(group.liquid.sum()),
+            "median_q": float(np.median(qs)) if qs else np.nan,
+            "butterfly_raw": int(len(bf_raw)),
+            "butterfly_repaired": int(len(bf_rep)),
+            "butterfly_printed_raw": int(((butterfly_raw.date == date_str) & butterfly_raw.violates_printed).sum()),
+            "butterfly_printed_repaired": int(((butterfly_rep.date == date_str) & butterfly_rep.violates_printed).sum()),
+            "calendar_raw": int(len(cal_raw)),
+            "calendar_repaired": int(len(cal_rep)),
+            "repricing_median_raw": float(rp_raw.median_rel_error.median()) if len(rp_raw) else np.nan,
+            "repricing_p95_raw": float(rp_raw.median_rel_error.quantile(0.95)) if len(rp_raw) else np.nan,
+            "repricing_median_repaired": float(rp_rep.median_rel_error.median()) if len(rp_rep) else np.nan,
+            "repricing_p95_repaired": float(rp_rep.median_rel_error.quantile(0.95)) if len(rp_rep) else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+def build_fit_slices(fits: dict, sample_dates: list[str], out_path: Path) -> None:
+    dates = [date for date in sample_dates if any(fit["date"] == date for fit in fits.values())]
+    if not dates:
+        dates = sorted({fit["date"] for fit in fits.values()})[:6]
+    max_expiries = max(len({fit["expiry"] for fit in fits.values() if fit["date"] == date}) for date in dates)
+    fig = make_subplots(
+        rows=len(dates),
+        cols=max_expiries,
+        subplot_titles=[f"{date} exp {i + 1}" for date in dates for i in range(max_expiries)],
+        vertical_spacing=0.035,
+        horizontal_spacing=0.03,
+    )
+    for row_idx, date in enumerate(dates, start=1):
+        items = sorted([fit for fit in fits.values() if fit["date"] == date], key=lambda item: item["T"])
+        for col_idx, fit in enumerate(items, start=1):
+            line_k = np.round(np.arange(-0.20, 0.20 + 0.005, 0.01), 10)
+            raw_w = svi_w(line_k, fit["raw"]["params"])
+            rep_w = svi_w(line_k, fit["repaired"]["params"])
+            with np.errstate(invalid="ignore", divide="ignore"):
+                raw_iv = np.sqrt(raw_w / fit["T"])
+                rep_iv = np.sqrt(rep_w / fit["T"])
+            fig.add_trace(
+                go.Scatter(x=fit["k"], y=fit["iv"], mode="markers", name="OTM quotes", marker=dict(size=4, color="#1f77b4"), showlegend=(row_idx == 1 and col_idx == 1)),
+                row=row_idx,
+                col=col_idx,
+            )
+            fig.add_trace(
+                go.Scatter(x=line_k, y=raw_iv, mode="lines", name="raw SVI", line=dict(color="#ff7f0e", width=1.2), showlegend=(row_idx == 1 and col_idx == 1)),
+                row=row_idx,
+                col=col_idx,
+            )
+            fig.add_trace(
+                go.Scatter(x=line_k, y=rep_iv, mode="lines", name="repaired SVI", line=dict(color="#2ca02c", width=1.2, dash="dot"), showlegend=(row_idx == 1 and col_idx == 1)),
+                row=row_idx,
+                col=col_idx,
+            )
+            fig.update_xaxes(title_text="k", row=row_idx, col=col_idx)
+            fig.update_yaxes(title_text="IV", row=row_idx, col=col_idx)
+    fig.update_layout(height=max(420, 300 * len(dates)), width=1800, title="Fitted SVI slices on sample dates")
+    fig.write_html(out_path, include_plotlyjs=True)
+
+
+def build_surface(fits: dict, out_path: Path) -> None:
+    by_date: dict[str, list[dict]] = {}
+    for fit in fits.values():
+        by_date.setdefault(fit["date"], []).append(fit)
+    dates = sorted(by_date)
+    frames = []
+    for date in dates:
+        items = sorted(by_date[date], key=lambda item: item["T"])
+        Ts = np.array([item["T"] for item in items])
+        z = []
+        for item in items:
+            w = svi_w(SURFACE_K, item["repaired"]["params"])
+            with np.errstate(invalid="ignore", divide="ignore"):
+                z.append(np.sqrt(w / item["T"]))
+        frames.append(go.Frame(
+            name=date,
+            data=[go.Surface(
+                x=SURFACE_K,
+                y=Ts,
+                z=np.vstack(z),
+                colorscale="Viridis",
+                colorbar=dict(title="IV"),
+                name=date,
+            )],
+        ))
+    first_items = sorted(by_date[dates[0]], key=lambda item: item["T"])
+    first_T = np.array([item["T"] for item in first_items])
+    first_z = []
+    for item in first_items:
+        w = svi_w(SURFACE_K, item["repaired"]["params"])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            first_z.append(np.sqrt(w / item["T"]))
+    fig = go.Figure(
+        data=[go.Surface(x=SURFACE_K, y=first_T, z=np.vstack(first_z), colorscale="Viridis", colorbar=dict(title="IV"))],
+        frames=frames,
+    )
+    steps = [dict(method="animate", args=[[date], dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))], label=date) for date in dates]
+    fig.update_layout(
+        title="SVI implied-volatility surface (repaired; use slider to change date)",
+        scene=dict(xaxis_title="k = ln(K/F)", yaxis_title="T (years)", zaxis_title="IV"),
+        sliders=[dict(active=0, currentvalue=dict(prefix="Date: "), steps=steps)],
+        height=850,
+    )
+    fig.write_html(out_path, include_plotlyjs=True)
+
+
+def distribution(values: pd.Series | np.ndarray) -> dict:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return {"count": 0, "median": float("nan"), "p95": float("nan"), "mean": float("nan"), "min": float("nan"), "max": float("nan")}
+    return {
+        "count": int(arr.size),
+        "median": float(np.median(arr)),
+        "p95": float(np.quantile(arr, 0.95)),
+        "mean": float(np.mean(arr)),
+        "min": float(np.min(arr)),
+        "max": float(np.max(arr)),
+    }
+
+
+def monthly_sample_table(calibration: pd.DataFrame, sample_months: list[str]) -> list[dict]:
+    rows = []
+    for month in sample_months:
+        subset = calibration[calibration.month == month]
+        if subset.empty:
+            continue
+        rows.append({
+            "month": month,
+            "dates": int(len(subset)),
+            "fits": int(subset.n_fits.sum()),
+            "skipped": int(subset.n_skipped.sum()),
+            "quotes_liquid": int(subset.quotes_liquid.sum()),
+            "median_q": float(subset.median_q.median()) if subset.median_q.notna().any() else float("nan"),
+            "butterfly_raw": int(subset.butterfly_raw.sum()),
+            "butterfly_repaired": int(subset.butterfly_repaired.sum()),
+            "calendar_raw": int(subset.calendar_raw.sum()),
+            "calendar_repaired": int(subset.calendar_repaired.sum()),
+            "repricing_median_raw": float(subset.repricing_median_raw.median()) if subset.repricing_median_raw.notna().any() else float("nan"),
+            "repricing_median_repaired": float(subset.repricing_median_repaired.median()) if subset.repricing_median_repaired.notna().any() else float("nan"),
+        })
+    return rows
+
+
+def print_summary(console: Console, params: dict, metrics: dict, sample_months: list[dict], sample_dates: list[dict]) -> None:
+    console.print(Panel.fit(
+        f"Q1A SVI | dataset=io | price_col={params['price_col']} | seed={params['seed']} | "
+        f"fits={metrics['fits']} | skipped={metrics['skipped']}",
+        title="Q1 Option A",
+    ))
+    table = Table(title="Quote filtering")
+    table.add_column("Item")
+    table.add_column("Value", justify="right")
+    for key in ("quotes_total", "quotes_liquid"):
+        table.add_row(key, f"{metrics[key]:,}")
+    for key, value in metrics["filter_removals"]["independent"].items():
+        table.add_row(f"independent {key}", f"{value:,}")
+    for key, value in metrics["filter_removals"]["sequential"].items():
+        table.add_row(f"sequential {key}", f"{value:,}")
+    console.print(table)
+
+    table = Table(title="Implied-vol inversion")
+    table.add_column("Status")
+    table.add_column("Calls", justify="right")
+    table.add_column("Puts", justify="right")
+    statuses = sorted(set(metrics["iv"]["status_counts"]["C"]) | set(metrics["iv"]["status_counts"]["P"]))
+    for status in statuses:
+        table.add_row(status, f"{metrics['iv']['status_counts']['C'].get(status, 0):,}", f"{metrics['iv']['status_counts']['P'].get(status, 0):,}")
+    console.print(table)
+
+    table = Table(title="No-arbitrage audits")
+    table.add_column("Audit")
+    table.add_column("Raw", justify="right")
+    table.add_column("Repaired", justify="right")
+    table.add_row("butterfly (correct g)", f"{metrics['butterfly']['raw']['violations']:,}", f"{metrics['butterfly']['repaired']['violations']:,}")
+    table.add_row("butterfly (printed g)", f"{metrics['butterfly']['raw']['violations_printed']:,}", f"{metrics['butterfly']['repaired']['violations_printed']:,}")
+    table.add_row("w <= 0", f"{metrics['butterfly']['raw']['w_nonpositive']:,}", f"{metrics['butterfly']['repaired']['w_nonpositive']:,}")
+    table.add_row("calendar", f"{metrics['calendar']['raw']['violations']:,}", f"{metrics['calendar']['repaired']['violations']:,}")
+    console.print(table)
+
+    table = Table(title="Repricing |C_BS - C_mkt| / C_mkt across fits")
+    table.add_column("Metric")
+    table.add_column("Raw", justify="right")
+    table.add_column("Repaired", justify="right")
+    for key, label in (
+        ("per_fit_max_median", "median of per-fit max"),
+        ("per_fit_max_p95", "p95 of per-fit max"),
+        ("per_fit_median_median", "median of per-fit median"),
+        ("per_fit_median_p95", "p95 of per-fit median"),
+        ("worst_fit_max", "worst per-fit max"),
+    ):
+        table.add_row(label, f"{metrics['repricing']['raw'][key]:.6f}", f"{metrics['repricing']['repaired'][key]:.6f}")
+    console.print(table)
+
+    if sample_months:
+        table = Table(title="Sample months")
+        for col in ("month", "dates", "fits", "skipped", "quotes", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "reprice raw", "reprice rep"):
+            table.add_column(col, justify="right" if col != "month" else "left")
+        for row in sample_months:
+            table.add_row(
+                row["month"],
+                f"{row['dates']}",
+                f"{row['fits']}",
+                f"{row['skipped']}",
+                f"{row['quotes_liquid']:,}",
+                f"{row['median_q']:.4f}",
+                f"{row['butterfly_raw']}",
+                f"{row['butterfly_repaired']}",
+                f"{row['calendar_raw']}",
+                f"{row['calendar_repaired']}",
+                f"{row['repricing_median_raw']:.4f}",
+                f"{row['repricing_median_repaired']:.4f}",
+            )
+        console.print(table)
+
+    if sample_dates:
+        table = Table(title="Sample dates")
+        for col in ("date", "fits", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "reprice raw", "reprice rep"):
+            table.add_column(col, justify="right" if col != "date" else "left")
+        for row in sample_dates:
+            table.add_row(
+                row["date"], f"{row['n_fits']}", f"{row['median_q']:.4f}", f"{row['butterfly_raw']}",
+                f"{row['butterfly_repaired']}", f"{row['calendar_raw']}", f"{row['calendar_repaired']}",
+                f"{row['repricing_median_raw']:.4f}", f"{row['repricing_median_repaired']:.4f}",
+            )
+        console.print(table)
+
+
+def run(args: argparse.Namespace) -> dict:
+    console = Console(width=220)
+    start = time.perf_counter()
+    np.random.seed(args.seed)
+    root = ROOT.resolve()
+    out_resolved = args.out_dir.resolve()
+    if out_resolved != root and root not in out_resolved.parents:
+        raise ValueError(f"output directory must stay inside {root}: {out_resolved}")
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print("[bold]Loading and verifying data[/bold]")
+    options, shibor, metadata = load_data(args.options, args.shibor, args.metadata)
+    input_hashes = {
+        "options_sha256": sha256_file(args.options),
+        "shibor_sha256": sha256_file(args.shibor),
+    }
+    console.print(f"  options rows={len(options):,} dates={options.date.nunique()} expiries={options.expiry.nunique()}")
+    console.print(f"  shibor rows={len(shibor):,} range={shibor.date.min().date()}..{shibor.date.max().date()}")
+
+    console.print("[bold]Estimating forwards from put-call parity[/bold]")
+    forwards, parity = estimate_forwards(options, shibor, args.price_col)
+    data, filter_counts = apply_filters(options, forwards, args)
+    console.print(f"  date-expiry pairs={len(forwards)} | quotes liquid={filter_counts['quotes_liquid']:,}/{filter_counts['quotes_total']:,}")
+
+    console.print("[bold]Inverting implied volatilities[/bold]")
+    iv, divergence, iv_stats = compute_implied_vols(data[data.liquid])
+    console.print(f"  IV ok={iv_stats['ok_quotes']:,}/{iv_stats['attempted_quotes']:,} | C-P gap median={iv_stats['gap_median']:.3g} p95|gap|={iv_stats['gap_p95_abs']:.3g}")
+
+    console.print("[bold]Fitting raw SVI and repairing violations[/bold]")
+    fit_start = time.perf_counter()
+    fits, svi_params, fit_history = make_fits(forwards, data, iv, args.min_strikes)
+    fit_seconds = time.perf_counter() - fit_start
+    console.print(f"  fits={len(fits)} skipped={len(fit_history['skipped'])} {fit_history['skip_reasons']} raw repair candidates={sum(1 for x in fit_history['repair'] if x['needed_repair'])}")
+
+    butterfly_raw = butterfly_rows(fits, "raw")
+    butterfly_rep = butterfly_rows(fits, "repaired")
+    calendar_raw = calendar_rows(fits, "raw")
+    calendar_rep = calendar_rows(fits, "repaired")
+    repricing_raw, repricing_raw_summary = repricing_for_stage(fits, data[data.liquid], "raw")
+    repricing_rep, repricing_rep_summary = repricing_for_stage(fits, data[data.liquid], "repaired")
+
+    bf_raw_summary = {
+        "violations": int(butterfly_raw.violates_correct.sum()),
+        "violations_printed": int(butterfly_raw.violates_printed.sum()),
+        "w_nonpositive": int(butterfly_raw.w_nonpositive.sum()),
+        "fits_with_violation": int(butterfly_raw.groupby(["date", "expiry"]).violates_correct.any().sum()),
+        "checks": int(len(butterfly_raw)),
+        "min_g": float(butterfly_raw.g.min()) if np.isfinite(butterfly_raw.g).any() else float("nan"),
+    }
+    bf_rep_summary = {
+        "violations": int(butterfly_rep.violates_correct.sum()),
+        "violations_printed": int(butterfly_rep.violates_printed.sum()),
+        "w_nonpositive": int(butterfly_rep.w_nonpositive.sum()),
+        "fits_with_violation": int(butterfly_rep.groupby(["date", "expiry"]).violates_correct.any().sum()),
+        "checks": int(len(butterfly_rep)),
+        "min_g": float(butterfly_rep.g.min()) if np.isfinite(butterfly_rep.g).any() else float("nan"),
+    }
+    calendar_raw_summary = calendar_summary(calendar_raw)
+    calendar_rep_summary = calendar_summary(calendar_rep)
+
+    surface = surface_frames(fits, "repaired")[["date", "expiry", "T", "F", "k", "w", "iv"]].merge(
+        surface_frames(fits, "raw")[["date", "expiry", "k", "w", "iv"]].rename(columns={"w": "w_raw", "iv": "iv_raw"}),
+        on=["date", "expiry", "k"],
+        how="left",
+    )
+    term_structure = term_structure_rows(fits)
+    calibration = calibration_by_date(fits, data, butterfly_raw, butterfly_rep, calendar_raw, calendar_rep, repricing_raw, repricing_rep)
+
+    parity_stats = {
+        "pairs": int(len(parity)),
+        "abs_resid_S0_median": float(parity.resid_S0.abs().median()) if len(parity) else float("nan"),
+        "abs_resid_S0_p95": float(parity.resid_S0.abs().quantile(0.95)) if len(parity) else float("nan"),
+        "abs_resid_F_median": float(parity.resid_F.abs().median()) if len(parity) else float("nan"),
+        "abs_resid_F_p95": float(parity.resid_F.abs().quantile(0.95)) if len(parity) else float("nan"),
+        "q_median": float(forwards.q.median()) if len(forwards) else float("nan"),
+        "q_p05": float(forwards.q.quantile(0.05)) if len(forwards) else float("nan"),
+        "q_p95": float(forwards.q.quantile(0.95)) if len(forwards) else float("nan"),
+        "in_band_fraction": float(parity.in_band.mean()) if len(parity) else float("nan"),
+        "fallback_forwards": int(forwards.fallback_F.sum()) if len(forwards) else 0,
+    }
+
+    sample_dates = list(metadata.get("sample_dates", []))
+    sample_months = list(dict.fromkeys(pd.to_datetime(sample_dates).strftime("%Y-%m"))) if sample_dates else []
+    if not sample_months:
+        sample_months = sorted(calibration.month.unique())
+    sample_date_rows = []
+    for date in sample_dates:
+        subset = calibration[calibration.date == date]
+        if len(subset):
+            row = subset.iloc[0]
+            sample_date_rows.append({key: (float(row[key]) if isinstance(row[key], (float, np.floating)) else row[key]) for key in (
+                "date", "n_fits", "n_skipped", "median_q", "butterfly_raw", "butterfly_repaired",
+                "calendar_raw", "calendar_repaired", "repricing_median_raw", "repricing_median_repaired",
+            )})
+    monthly_rows = monthly_sample_table(calibration, sample_months)
+
+    metrics = {
+        "quotes_total": filter_counts["quotes_total"],
+        "quotes_liquid": filter_counts["quotes_liquid"],
+        "filter_removals": {
+            "independent": filter_counts["independent_removals"],
+            "sequential": filter_counts["sequential_removals"],
+            "note": "No bid-ask snapshot is available; volume >= min_volume stands in for spread/liquidity.",
+        },
+        "date_expiry_groups_total": filter_counts["date_expiry_groups_total"],
+        "date_expiry_groups_liquid": filter_counts["date_expiry_groups_liquid"],
+        "fits": int(len(fits)),
+        "skipped": int(len(fit_history["skipped"])),
+        "skipped_by_reason": fit_history["skip_reasons"],
+        "skipped_detail": fit_history["skipped"],
+        "otm_quotes_used": int(fit_history["otm_counts"]["otm_quotes_used"]),
+        "parity": parity_stats,
+        "iv": iv_stats,
+        "repricing": {
+            "raw": repricing_raw_summary,
+            "repaired": repricing_rep_summary,
+            "note": "Per fit: max and median relative call repricing error on liquid strikes. Across fits: median and p95 of those per-fit statistics.",
+        },
+        "butterfly": {
+            "raw": bf_raw_summary,
+            "repaired": bf_rep_summary,
+            "tolerance": BUTTERFLY_TOL,
+            "grid": {"start": -0.14, "stop": 0.14, "step": 0.01, "points": int(len(GRID_K))},
+            "note": "Primary test uses correct Gatheral g incl. w''/2; printed formula omits w''/2.",
+        },
+        "calendar": {
+            "raw": calendar_raw_summary,
+            "repaired": calendar_rep_summary,
+            "tolerance_w": CALENDAR_TOL,
+            "grid": {"start": -0.14, "stop": 0.14, "step": 0.01, "points": int(len(GRID_K))},
+            "term_structure": "linear interpolation in total variance w at fixed k",
+        },
+        "sample_months": monthly_rows,
+        "sample_dates": sample_date_rows,
+        "input_hashes": input_hashes,
+    }
+    params = {
+        "approach": "Q1A_SVI",
+        "dataset": "io",
+        "seed": args.seed,
+        "price_col": args.price_col,
+        "min_volume": args.min_volume,
+        "min_price": args.min_price,
+        "kband": args.kband,
+        "min_days": args.min_days,
+        "min_strikes": args.min_strikes,
+        "inputs": {"options": str(args.options), "shibor": str(args.shibor), "metadata": str(args.metadata)},
+        "rate_convention": "r(tau)=ln(1+L/100*tau*365/360)/tau from SHIBOR ACT/360 simple; linear in T, flat outside pillars",
+        "forward_estimator": "volume-weighted mean of F_K=K+(C-P)/DF within |ln(F_K/median F_K)|<=0.05",
+        "iv_bounds": [1e-4, 5.0],
+        "svi_form": "a+b*(rho*(k-m)+sqrt((k-m)^2+eta^2)); b>=0, |rho|<1, eta>0",
+        "svi_starting_points": [{"label": label, "b": b, "rho": rho, "m": m, "eta": eta} for label, b, rho, m, eta in SVI_STARTS],
+        "svi_weights": "equal weights on OTM liquid quotes",
+        "butterfly_grid": {"start": -0.14, "stop": 0.14, "step": 0.01},
+        "surface_grid": {"start": -0.20, "stop": 0.20, "step": 0.02},
+        "out_dir": str(args.out_dir),
+    }
+    history = {
+        **fit_history,
+        "rates": {
+            "pillars": PILLAR_DAYS,
+            "convention": "simple ACT/360 SHIBOR converted to continuous zero rate on ACT/365 T",
+        },
+        "timing": {"fit_seconds": fit_seconds, "total_seconds": time.perf_counter() - start},
+    }
+    metrics_payload = {
+        "params": params,
+        "metrics": metrics,
+        "fit_seconds": float(fit_seconds),
+        "history": history,
+    }
+
+    console.print("[bold]Writing outputs[/bold]")
+    output = args.out_dir
+    butterfly_raw.to_csv(output / "butterfly_audit_raw.csv", index=False)
+    butterfly_rep.to_csv(output / "butterfly_audit_repaired.csv", index=False)
+    pd.concat([butterfly_raw, butterfly_rep], ignore_index=True).to_csv(output / "butterfly_audit.csv", index=False)
+    calendar_raw.to_csv(output / "calendar_audit_raw.csv", index=False)
+    calendar_rep.to_csv(output / "calendar_audit_repaired.csv", index=False)
+    pd.concat([calendar_raw, calendar_rep], ignore_index=True).to_csv(output / "calendar_audit.csv", index=False)
+    repricing_raw.to_csv(output / "repricing_raw.csv", index=False)
+    repricing_rep.to_csv(output / "repricing.csv", index=False)
+    svi_params.to_csv(output / "svi_params.csv", index=False)
+    calibration.to_csv(output / "calibration_by_date.csv", index=False)
+    surface.to_csv(output / "surface.csv", index=False)
+    term_structure.to_csv(output / "term_structure.csv", index=False)
+    divergence.to_csv(output / "iv_divergence.csv", index=False)
+    parity.to_csv(output / "parity_residuals.csv", index=False)
+    (output / "metrics.json").write_text(json.dumps(to_jsonable(metrics_payload), indent=2, allow_nan=False))
+    build_fit_slices(fits, sample_dates, output / "fit_slices.html")
+    build_surface(fits, output / "surface.html")
+
+    print_summary(console, params, metrics, monthly_rows, sample_date_rows)
+    console.print(f"[green]Wrote {output}[/green]")
+    return metrics_payload
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    run(args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -7,7 +7,11 @@ Advanced Programming 2026 coursework: Q1 arbitrage-free implied volatility surfa
 ```bash
 uv sync --python 3.13
 source .venv/bin/activate
+export TORCH_HOME="$PWD/.cache/torch"
+export XDG_CACHE_HOME="$PWD/.cache"
 ```
+
+`uv.toml` pins uv's cache to `.uv-cache/`; `.cache/` and `.uv-cache/` are gitignored so tool caches stay inside the repository.
 
 ## Layout
 
