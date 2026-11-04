@@ -55,7 +55,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OPTIONS = ROOT / "data" / "clean" / "options_io.csv"
 DEFAULT_SHIBOR = ROOT / "data" / "clean" / "shibor.csv"
 DEFAULT_METADATA = ROOT / "data" / "metadata.json"
+DEFAULT_RAW_CFFEX = ROOT / "data" / "raw" / "cffex"
 DEFAULT_OUT = ROOT / "results" / "approach1" / "io"
+DEFAULT_ETA_MIN = 0.01
+DEFAULT_ETA_MAX = 1.0
+LEGACY_ETA_MIN = 1e-6
+LEGACY_ETA_MAX = 2.0
 
 PILLAR_DAYS = {"ON": 1, "1W": 7, "2W": 14, "1M": 30, "3M": 90, "6M": 180, "9M": 270, "1Y": 365}
 GRID_K = np.round(np.arange(-0.14, 0.14 + 0.005, 0.01), 10)
@@ -70,10 +75,16 @@ SVI_STARTS = (
     ("wide_shallow_smile", 0.02, -0.30, -0.10, 0.25),
     ("moderate_skew", 0.10, -0.50, -0.02, 0.20),
 )
-SVI_LOWER = np.array([-2.0, 0.0, -0.999, -2.0, 1e-6])
-SVI_UPPER = np.array([2.0, 5.0, 0.999, 2.0, 2.0])
+SVI_LOWER = np.array([-2.0, 0.0, -0.999, -2.0, DEFAULT_ETA_MIN])
+SVI_UPPER = np.array([2.0, 5.0, 0.999, 2.0, DEFAULT_ETA_MAX])
 BUTTERFLY_TOL = 1e-8
-CALENDAR_TOL = 1e-10
+CALENDAR_TOL = 1e-8
+
+
+def svi_bounds(eta_min: float, eta_max: float) -> tuple[np.ndarray, np.ndarray]:
+    lower = np.array([-2.0, 0.0, -0.999, -2.0, eta_min], dtype=float)
+    upper = np.array([2.0, 5.0, 0.999, 2.0, eta_max], dtype=float)
+    return lower, upper
 IV_GAP_REPORT = 0.01
 PRICE_TOL = 1e-12
 
@@ -81,12 +92,16 @@ PRICE_TOL = 1e-12
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Q1 Option A: SVI surface on CFFEX IO options")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--price-col", choices=["close", "settle"], default="close")
+    parser.add_argument("--price-col", choices=["close", "settle"], default="settle")
     parser.add_argument("--min-volume", type=float, default=10.0)
     parser.add_argument("--min-price", type=float, default=1.0)
     parser.add_argument("--kband", type=float, default=0.20)
     parser.add_argument("--min-days", type=int, default=7)
     parser.add_argument("--min-strikes", type=int, default=6)
+    parser.add_argument("--eta-min", type=float, default=DEFAULT_ETA_MIN)
+    parser.add_argument("--eta-max", type=float, default=DEFAULT_ETA_MAX)
+    parser.add_argument("--legacy-svi-params", type=Path, default=None)
+    parser.add_argument("--raw-cffex", type=Path, default=DEFAULT_RAW_CFFEX)
     parser.add_argument("--options", type=Path, default=DEFAULT_OPTIONS)
     parser.add_argument("--shibor", type=Path, default=DEFAULT_SHIBOR)
     parser.add_argument("--metadata", type=Path, default=DEFAULT_METADATA)
@@ -462,7 +477,11 @@ def fit_svi(
     penalty=None,
     x0_params: np.ndarray | None = None,
     include_starts: bool = True,
+    bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict | None:
+    if bounds is None:
+        bounds = svi_bounds(DEFAULT_ETA_MIN, DEFAULT_ETA_MAX)
+    lower, upper = bounds
     starts: list[tuple[str, np.ndarray]] = []
     if x0_params is not None:
         starts.append(("warm_start", np.asarray(x0_params, dtype=float)))
@@ -477,12 +496,12 @@ def fit_svi(
 
     best = None
     for label, x0 in starts:
-        x0 = np.clip(x0, SVI_LOWER + 1e-10, SVI_UPPER - 1e-10)
+        x0 = np.clip(x0, lower + 1e-10, upper - 1e-10)
         try:
             sol = least_squares(
                 objective,
                 x0,
-                bounds=(SVI_LOWER, SVI_UPPER),
+                bounds=(lower, upper),
                 method="trf",
                 x_scale="jac",
                 max_nfev=4000,
@@ -518,14 +537,18 @@ def audit_svi(params: np.ndarray, k_grid: np.ndarray, tol: float = BUTTERFLY_TOL
         "g": g,
         "g_printed": g_printed,
         "w_nonpositive": ~(w > 0),
+        "violates_correct_strict": np.isfinite(g) & (g < 0.0),
         "violates_correct": np.isfinite(g) & (g < -tol),
+        "violates_printed_strict": np.isfinite(g_printed) & (g_printed < 0.0),
         "violates_printed": np.isfinite(g_printed) & (g_printed < -tol),
     })
 
 
 def audit_summary(audit: pd.DataFrame) -> dict:
     return {
+        "butterfly_violations_correct_strict": int(audit.violates_correct_strict.sum()),
         "butterfly_violations_correct": int(audit.violates_correct.sum()),
+        "butterfly_violations_printed_strict": int(audit.violates_printed_strict.sum()),
         "butterfly_violations_printed": int(audit.violates_printed.sum()),
         "w_nonpositive": int(audit.w_nonpositive.sum()),
         "min_g": float(audit.g.min()) if np.isfinite(audit.g).any() else float("nan"),
@@ -569,6 +592,7 @@ def repair_svi(
     raw_params: np.ndarray,
     current_params: np.ndarray,
     prev_w: np.ndarray | None = None,
+    bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, dict]:
     best_params = np.asarray(current_params, dtype=float)
     best_score = fit_constraint_score(best_params, k, w, prev_w)
@@ -586,7 +610,15 @@ def repair_svi(
                     prev_w=prev_w,
                     calendar_weight=level if prev_w is not None else 0.0,
                 )
-            candidate = fit_svi(k, w, k_grid=GRID_K, penalty=penalty, x0_params=start, include_starts=False)
+            candidate = fit_svi(
+                k,
+                w,
+                k_grid=GRID_K,
+                penalty=penalty,
+                x0_params=start,
+                include_starts=False,
+                bounds=bounds,
+            )
             attempts += 1
             if candidate is None:
                 continue
@@ -610,6 +642,7 @@ def make_fits(
     data: pd.DataFrame,
     iv: pd.DataFrame,
     min_strikes: int,
+    bounds: tuple[np.ndarray, np.ndarray],
 ) -> tuple[dict, pd.DataFrame, dict]:
     from collections import Counter
 
@@ -655,7 +688,7 @@ def make_fits(
             continue
         k = group.k.to_numpy(dtype=float)
         w = group.w.to_numpy(dtype=float)
-        raw = fit_svi(k, w)
+        raw = fit_svi(k, w, bounds=bounds)
         if raw is None:
             skipped.append({
                 "date": key[0],
@@ -711,7 +744,9 @@ def make_fits(
         raw_audit = fit["raw_audit"]
         needs_repair = raw_audit["butterfly_violations_correct"] > 0 or raw_audit["w_nonpositive"] > 0
         if needs_repair:
-            repaired_params, info = repair_svi(fit["k"], fit["w"], raw_params, raw_params, prev_w=None)
+            repaired_params, info = repair_svi(
+                fit["k"], fit["w"], raw_params, raw_params, prev_w=None, bounds=bounds
+            )
             fit["repair_info"] = info
         else:
             repaired_params = raw_params
@@ -761,7 +796,9 @@ def make_fits(
                 if violations > 0:
                     raw_params = fit["raw"]["params"]
                     current_params = fit["repaired"]["params"]
-                    calibrated_params, info = repair_svi(fit["k"], fit["w"], raw_params, current_params, prev_w=prev_w)
+                    calibrated_params, info = repair_svi(
+                        fit["k"], fit["w"], raw_params, current_params, prev_w=prev_w, bounds=bounds
+                    )
                     old_rmse = fit["repaired"]["rmse"]
                     fit["repaired"] = {
                         "params": calibrated_params,
@@ -864,6 +901,7 @@ def calendar_rows(fits: dict, stage: str) -> pd.DataFrame:
                 "w_1": w1,
                 "w_2": w2,
                 "forward_variance": forward_var,
+                "violates_calendar_strict": w2 < w1,
                 "violates_calendar": w2 < w1 - CALENDAR_TOL,
             }))
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
@@ -871,52 +909,110 @@ def calendar_rows(fits: dict, stage: str) -> pd.DataFrame:
 
 def calendar_summary(frame: pd.DataFrame) -> dict:
     if frame.empty:
-        return {"checks": 0, "violations": 0, "min_forward_variance": float("nan")}
+        return {
+            "checks": 0,
+            "violations": 0,
+            "violations_strict": 0,
+            "min_forward_variance": float("nan"),
+            "locations": 0,
+            "locations_strict": 0,
+        }
     violations = frame[frame.violates_calendar]
+    violations_strict = frame[frame.violates_calendar_strict]
     return {
         "checks": int(len(frame)),
         "violations": int(frame.violates_calendar.sum()),
+        "violations_strict": int(frame.violates_calendar_strict.sum()),
         "min_forward_variance": float(frame.forward_variance.min()),
         "locations": int(len(violations)),
+        "locations_strict": int(len(violations_strict)),
     }
 
 
-def repricing_for_stage(fits: dict, liquid: pd.DataFrame, stage: str) -> tuple[pd.DataFrame, dict]:
-    quotes = liquid[liquid.cp == "C"][["date", "expiry", "K", "price", "volume"]].rename(columns={"price": "C_mkt"})
-    quotes["date"] = quotes["date"].dt.strftime("%Y-%m-%d")
-    quotes["expiry"] = quotes["expiry"].dt.strftime("%Y-%m-%d")
-    quotes = quotes.merge(
-        pd.DataFrame([{
-            "date": f["date"],
-            "expiry": f["expiry"],
-            "F": f["F"],
-            "T": f["T"],
-            "DF": f["DF"],
-        } for f in fits.values()]),
-        on=["date", "expiry"],
-        how="inner",
-    )
-    quotes = quotes[(quotes.C_mkt > 0) & np.isfinite(quotes.C_mkt)].copy()
-    quotes["k"] = np.log(quotes.K / quotes.F)
+def repricing_for_stage(fits: dict, liquid: pd.DataFrame, stage: str, basis: str) -> tuple[pd.DataFrame, dict]:
+    """Reprice liquid quotes from one fitted slice.
+
+    Both bases are evaluated on the same strikes: those with a liquid OTM
+    option and a liquid call. ``otm`` uses the traded OTM option (put below F,
+    call at/above F); ``calls`` uses the traded call. No synthetic call is made.
+    """
     rows = []
-    for (date, expiry), group in quotes.groupby(["date", "expiry"], sort=True):
-        key = (date, expiry)
-        if key not in fits:
-            continue
-        fit = fits[key]
-        params = fit[stage]["params"]
-        w = svi_w(group.k.to_numpy(dtype=float), params)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            iv = np.sqrt(w / fit["T"])
-        model = np.array([bs_price("C", fit["F"], K, fit["T"], fit["DF"], sigma) for K, sigma in zip(group.K, iv)])
-        market = group.C_mkt.to_numpy(dtype=float)
-        valid = np.isfinite(model) & np.isfinite(iv) & (market > 0)
-        if not np.any(valid):
+    for fit in fits.values():
+        mask = (
+            (liquid.date == pd.Timestamp(fit["date"]))
+            & (liquid.expiry == pd.Timestamp(fit["expiry"]))
+        )
+        group = liquid[mask]
+        if group.empty:
             rows.append({
+                "basis": basis,
                 "stage": stage,
                 "date": fit["date"],
                 "expiry": fit["expiry"],
                 "n_strikes": 0,
+                "n_otm_available": 0,
+                "n_calls_available": 0,
+                "n_common_strikes": 0,
+                "max_rel_error": np.nan,
+                "median_rel_error": np.nan,
+                "worst_K": np.nan,
+                "fit_rmse": fit[stage]["rmse"],
+            })
+            continue
+        calls = (
+            group[group.cp == "C"][["K", "price"]]
+            .rename(columns={"price": "call_price"})
+            .drop_duplicates("K")
+        )
+        otm = group[
+            ((group.cp == "C") & (group.K >= fit["F"]))
+            | ((group.cp == "P") & (group.K < fit["F"]))
+        ][["K", "cp", "price"]].rename(columns={"cp": "otm_cp", "price": "otm_price"}).drop_duplicates("K")
+        common = otm.merge(calls, on="K", how="inner")
+        common = common[(common.otm_price > 0) & np.isfinite(common.otm_price)]
+        if basis == "calls":
+            common = common[(common.call_price > 0) & np.isfinite(common.call_price)]
+        if common.empty:
+            rows.append({
+                "basis": basis,
+                "stage": stage,
+                "date": fit["date"],
+                "expiry": fit["expiry"],
+                "n_strikes": 0,
+                "n_otm_available": int(len(otm)),
+                "n_calls_available": int(len(calls)),
+                "n_common_strikes": int(len(common)),
+                "max_rel_error": np.nan,
+                "median_rel_error": np.nan,
+                "worst_K": np.nan,
+                "fit_rmse": fit[stage]["rmse"],
+            })
+            continue
+        k = np.log(common.K.to_numpy(dtype=float) / fit["F"])
+        w = svi_w(k, fit[stage]["params"])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            iv = np.sqrt(w / fit["T"])
+        if basis == "otm":
+            cp_values = common.otm_cp.to_numpy(dtype=str)
+            market = common.otm_price.to_numpy(dtype=float)
+        else:
+            cp_values = np.full(len(common), "C", dtype=object)
+            market = common.call_price.to_numpy(dtype=float)
+        model = np.array([
+            bs_price(cp, fit["F"], K, fit["T"], fit["DF"], sigma)
+            for cp, K, sigma in zip(cp_values, common.K, iv)
+        ])
+        valid = np.isfinite(model) & np.isfinite(iv) & (market > 0)
+        if not np.any(valid):
+            rows.append({
+                "basis": basis,
+                "stage": stage,
+                "date": fit["date"],
+                "expiry": fit["expiry"],
+                "n_strikes": 0,
+                "n_otm_available": int(len(otm)),
+                "n_calls_available": int(len(calls)),
+                "n_common_strikes": int(len(common)),
                 "max_rel_error": np.nan,
                 "median_rel_error": np.nan,
                 "worst_K": np.nan,
@@ -924,12 +1020,16 @@ def repricing_for_stage(fits: dict, liquid: pd.DataFrame, stage: str) -> tuple[p
             })
             continue
         rel = np.abs(model[valid] - market[valid]) / market[valid]
-        K_valid = group.K.to_numpy(dtype=float)[valid]
+        K_valid = common.K.to_numpy(dtype=float)[valid]
         rows.append({
+            "basis": basis,
             "stage": stage,
             "date": fit["date"],
             "expiry": fit["expiry"],
             "n_strikes": int(valid.sum()),
+            "n_otm_available": int(len(otm)),
+            "n_calls_available": int(len(calls)),
+            "n_common_strikes": int(len(common)),
             "max_rel_error": float(np.max(rel)),
             "median_rel_error": float(np.median(rel)),
             "worst_K": float(K_valid[int(np.argmax(rel))]),
@@ -938,6 +1038,8 @@ def repricing_for_stage(fits: dict, liquid: pd.DataFrame, stage: str) -> tuple[p
     frame = pd.DataFrame(rows)
     summary = {
         "fits": int(len(frame)),
+        "n_strikes_total": int(frame.n_strikes.sum()) if len(frame) else 0,
+        "n_strikes_median": float(frame.n_strikes.median()) if len(frame) else float("nan"),
         "per_fit_max_median": float(frame.max_rel_error.median()) if len(frame) else float("nan"),
         "per_fit_max_p95": float(frame.max_rel_error.quantile(0.95)) if len(frame) else float("nan"),
         "per_fit_median_median": float(frame.median_rel_error.median()) if len(frame) else float("nan"),
@@ -992,7 +1094,322 @@ def term_structure_rows(fits: dict) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
-def calibration_by_date(fits: dict, data: pd.DataFrame, butterfly_raw: pd.DataFrame, butterfly_rep: pd.DataFrame, calendar_raw: pd.DataFrame, calendar_rep: pd.DataFrame, repricing_raw: pd.DataFrame, repricing_rep: pd.DataFrame) -> pd.DataFrame:
+def tenor_bucket(days: float) -> str:
+    if days <= 30:
+        return "<=30d"
+    if days <= 90:
+        return "31-90d"
+    if days <= 180:
+        return "91-180d"
+    if days <= 365:
+        return "181-365d"
+    return ">365d"
+
+
+def strike_spacing_summary(data: pd.DataFrame) -> dict:
+    liquid = data[data.liquid]
+    abs_diffs = []
+    rel_diffs = []
+    for (_, _), group in liquid.groupby(["date", "expiry"], sort=False):
+        strikes = np.sort(group.K.unique())
+        if len(strikes) < 2:
+            continue
+        diffs = np.diff(strikes)
+        abs_diffs.extend(diffs.tolist())
+        rel_diffs.extend((diffs / np.maximum(strikes[:-1], 1e-12)).tolist())
+    abs_diffs = np.asarray(abs_diffs, dtype=float)
+    rel_diffs = np.asarray(rel_diffs, dtype=float)
+    return {
+        "abs_median": float(np.median(abs_diffs)) if abs_diffs.size else float("nan"),
+        "abs_p05": float(np.quantile(abs_diffs, 0.05)) if abs_diffs.size else float("nan"),
+        "abs_p95": float(np.quantile(abs_diffs, 0.95)) if abs_diffs.size else float("nan"),
+        "rel_median": float(np.median(rel_diffs)) if rel_diffs.size else float("nan"),
+        "rel_p05": float(np.quantile(rel_diffs, 0.05)) if rel_diffs.size else float("nan"),
+        "rel_p95": float(np.quantile(rel_diffs, 0.95)) if rel_diffs.size else float("nan"),
+        "pairs": int(abs_diffs.size),
+    }
+
+
+def load_cffex_futures(raw_dir: Path) -> tuple[pd.DataFrame, dict]:
+    required = {"合约代码", "今收盘", "今结算"}
+    rows = []
+    errors = []
+    files = sorted(raw_dir.glob("*.csv"))
+    for path in files:
+        date_text = path.stem.split("_")[0]
+        try:
+            file_date = pd.Timestamp(date_text)
+        except (TypeError, ValueError):
+            errors.append({"file": path.name, "error": "unparseable_date"})
+            continue
+        try:
+            frame = pd.read_csv(path, encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError, pd.errors.ParserError) as exc:
+            errors.append({"file": path.name, "error": type(exc).__name__})
+            continue
+        if not required.issubset(frame.columns):
+            errors.append({"file": path.name, "error": "missing_columns"})
+            continue
+        for code_raw, close_raw, settle_raw in frame[["合约代码", "今收盘", "今结算"]].itertuples(index=False, name=None):
+            code = str(code_raw).strip()
+            if len(code) != 6 or not code.startswith("IF") or not code[2:].isdigit():
+                continue
+            yy = int(code[2:4])
+            mm = int(code[4:6])
+            if not 1 <= mm <= 12:
+                continue
+            close = pd.to_numeric(close_raw, errors="coerce")
+            settle = pd.to_numeric(settle_raw, errors="coerce")
+            rows.append({
+                "date": file_date,
+                "contract": code,
+                "fut_expiry_month": f"{2000 + yy:04d}-{mm:02d}",
+                "if_close": float(close) if pd.notna(close) else np.nan,
+                "if_settle": float(settle) if pd.notna(settle) else np.nan,
+            })
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame, {"files": len(files), "parsed_files": 0, "if_rows": 0, "errors": errors}
+    frame = frame.drop_duplicates(["date", "contract"]).sort_values(["date", "contract"]).reset_index(drop=True)
+    parsed_files = frame.date.nunique()
+    stats = {
+        "files": int(len(files)),
+        "parsed_files": int(parsed_files),
+        "if_rows": int(len(frame)),
+        "errors": errors,
+    }
+    return frame, stats
+
+
+def forward_check(forwards: pd.DataFrame, futures: pd.DataFrame, source_stats: dict) -> tuple[pd.DataFrame, dict]:
+    obs = forwards[["date", "expiry", "T", "days", "r", "DF", "S0", "F", "q"]].copy()
+    obs["month"] = obs.date.dt.strftime("%Y-%m")
+    obs["expiry_month"] = obs.expiry.dt.strftime("%Y-%m")
+    obs["tenor_bucket"] = obs.days.map(tenor_bucket)
+    if futures.empty:
+        obs["if_close"] = np.nan
+        obs["if_settle"] = np.nan
+        obs["contract"] = None
+    else:
+        obs = obs.merge(
+            futures[["date", "fut_expiry_month", "contract", "if_close", "if_settle"]],
+            left_on=["date", "expiry_month"],
+            right_on=["date", "fut_expiry_month"],
+            how="left",
+        ).drop(columns=["fut_expiry_month"])
+    obs["if_rel_settle"] = (obs.F / obs.if_settle - 1.0).abs()
+    obs["if_rel_close"] = (obs.F / obs.if_close - 1.0).abs()
+    obs["if_basis_settle"] = np.where(
+        (obs.if_settle > 0) & np.isfinite(obs.if_settle),
+        obs.r - np.log(obs.if_settle / obs.S0) / obs["T"],
+        np.nan,
+    )
+    obs["if_basis_close"] = np.where(
+        (obs.if_close > 0) & np.isfinite(obs.if_close),
+        obs.r - np.log(obs.if_close / obs.S0) / obs["T"],
+        np.nan,
+    )
+
+    def dist(values: pd.Series) -> dict:
+        arr = np.asarray(values, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        return {
+            "n": int(arr.size),
+            "median": float(np.median(arr)) if arr.size else float("nan"),
+            "p95": float(np.quantile(arr, 0.95)) if arr.size else float("nan"),
+            "max": float(np.max(arr)) if arr.size else float("nan"),
+        }
+
+    by_month = []
+    for month, group in obs.groupby("month", sort=True):
+        by_month.append({
+            "month": month,
+            "forwards": int(len(group)),
+            "matched_settle": int(group.if_settle.notna().sum()),
+            "matched_close": int(group.if_close.notna().sum()),
+            "implied_q_median": float(group.q.median()),
+            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
+            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+            "if_dev_settle": dist(group.if_rel_settle),
+            "if_dev_close": dist(group.if_rel_close),
+        })
+    by_month_bucket = []
+    for (month, bucket), group in obs.groupby(["month", "tenor_bucket"], sort=True):
+        by_month_bucket.append({
+            "month": month,
+            "tenor_bucket": bucket,
+            "forwards": int(len(group)),
+            "matched_settle": int(group.if_settle.notna().sum()),
+            "implied_q_median": float(group.q.median()),
+            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
+            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+            "if_dev_settle_median": float(group.if_rel_settle.median()) if group.if_rel_settle.notna().any() else float("nan"),
+            "if_dev_close_median": float(group.if_rel_close.median()) if group.if_rel_close.notna().any() else float("nan"),
+        })
+    by_bucket = []
+    for bucket, group in obs.groupby("tenor_bucket", sort=True):
+        by_bucket.append({
+            "tenor_bucket": bucket,
+            "forwards": int(len(group)),
+            "matched_settle": int(group.if_settle.notna().sum()),
+            "implied_q_median": float(group.q.median()),
+            "if_basis_settle_median": float(group.if_basis_settle.median()) if group.if_basis_settle.notna().any() else float("nan"),
+            "if_basis_close_median": float(group.if_basis_close.median()) if group.if_basis_close.notna().any() else float("nan"),
+        })
+    summary = {
+        "source": source_stats,
+        "forwards": int(len(obs)),
+        "matched_settle": int(obs.if_settle.notna().sum()),
+        "matched_close": int(obs.if_close.notna().sum()),
+        "unmatched": int(len(obs) - obs.if_settle.notna().sum()),
+        "if_dev_settle": dist(obs.if_rel_settle),
+        "if_dev_close": dist(obs.if_rel_close),
+        "implied_q_median": float(obs.q.median()),
+        "if_basis_settle_median": float(obs.if_basis_settle.median()) if obs.if_basis_settle.notna().any() else float("nan"),
+        "if_basis_close_median": float(obs.if_basis_close.median()) if obs.if_basis_close.notna().any() else float("nan"),
+        "by_month": by_month,
+        "by_month_bucket": by_month_bucket,
+        "by_bucket": by_bucket,
+        "note": "IF close/settle are the CFFEX fields 今收盘 and 今结算; matched by the IO expiry year-month. Basis is annualized r - ln(IF/S0)/T.",
+    }
+    return obs, summary
+
+
+def svi_bound_comparison(
+    current_params: pd.DataFrame,
+    legacy_path: Path | None,
+    eta_min: float,
+    eta_max: float,
+) -> tuple[pd.DataFrame, dict]:
+    current = current_params[[
+        "date", "expiry", "T", "eta_raw", "rmse_raw", "rmse_repaired"
+    ]].copy()
+    if legacy_path is None or not legacy_path.exists():
+        return pd.DataFrame(), {
+            "available": False,
+            "reason": "no_legacy_svi_params",
+            "eta_min": float(eta_min),
+            "eta_max": float(eta_max),
+        }
+    legacy = pd.read_csv(legacy_path)
+    needed = {"date", "expiry", "eta_raw", "rmse_raw", "rmse_repaired"}
+    if not needed.issubset(legacy.columns):
+        return pd.DataFrame(), {
+            "available": False,
+            "reason": "legacy_svi_params_missing_columns",
+            "eta_min": float(eta_min),
+            "eta_max": float(eta_max),
+        }
+    legacy = legacy[["date", "expiry", "eta_raw", "rmse_raw", "rmse_repaired"]].rename(columns={
+        "eta_raw": "eta_legacy",
+        "rmse_raw": "rmse_raw_legacy",
+        "rmse_repaired": "rmse_repaired_legacy",
+    })
+    current["date"] = current.date.astype(str)
+    current["expiry"] = current.expiry.astype(str)
+    legacy["date"] = legacy.date.astype(str)
+    legacy["expiry"] = legacy.expiry.astype(str)
+    merged = current.rename(columns={
+        "eta_raw": "eta_new",
+        "rmse_raw": "rmse_raw_new",
+        "rmse_repaired": "rmse_repaired_new",
+    }).merge(legacy, on=["date", "expiry"], how="inner")
+    if merged.empty:
+        return merged, {
+            "available": False,
+            "reason": "no_common_fits",
+            "eta_min": float(eta_min),
+            "eta_max": float(eta_max),
+        }
+    merged["days"] = merged["T"] * 365.0
+    merged["tenor_bucket"] = merged.days.map(tenor_bucket)
+    merged["legacy_at_lower"] = merged.eta_legacy <= LEGACY_ETA_MIN + 1e-6
+    merged["legacy_at_upper"] = merged.eta_legacy >= LEGACY_ETA_MAX - 1e-6
+    merged["legacy_near_lower_1e_4"] = merged.eta_legacy < 1e-4
+    merged["legacy_upper_gt_1_99"] = merged.eta_legacy > 1.99
+    merged["new_at_lower"] = merged.eta_new <= eta_min + 1e-6
+    merged["new_at_upper"] = merged.eta_new >= eta_max - 1e-6
+    merged["rmse_raw_delta"] = merged.rmse_raw_new - merged.rmse_raw_legacy
+    merged["rmse_repaired_delta"] = merged.rmse_repaired_new - merged.rmse_repaired_legacy
+
+    def bucket_rows(group: pd.DataFrame) -> dict:
+        return {
+            "n": int(len(group)),
+            "legacy_at_lower": int(group.legacy_at_lower.sum()),
+            "legacy_at_upper": int(group.legacy_at_upper.sum()),
+            "new_at_lower": int(group.new_at_lower.sum()),
+            "new_at_upper": int(group.new_at_upper.sum()),
+            "legacy_rmse_raw_median": float(group.rmse_raw_legacy.median()),
+            "new_rmse_raw_median": float(group.rmse_raw_new.median()),
+            "delta_rmse_raw_median": float(group.rmse_raw_delta.median()),
+            "legacy_rmse_repaired_median": float(group.rmse_repaired_legacy.median()),
+            "new_rmse_repaired_median": float(group.rmse_repaired_new.median()),
+            "delta_rmse_repaired_median": float(group.rmse_repaired_delta.median()),
+        }
+
+    by_bucket = []
+    for bucket in ("<=30d", "31-90d", "91-180d", "181-365d", ">365d"):
+        group = merged[merged.tenor_bucket == bucket]
+        if group.empty:
+            continue
+        by_bucket.append({"tenor_bucket": bucket, **bucket_rows(group)})
+    overall = {
+        "available": True,
+        "eta_min": float(eta_min),
+        "eta_max": float(eta_max),
+        "legacy_eta_min": float(LEGACY_ETA_MIN),
+        "legacy_eta_max": float(LEGACY_ETA_MAX),
+        "common_fits": int(len(merged)),
+        **{key: value for key, value in bucket_rows(merged).items() if key != "n"},
+        "rmse_raw_new_p95": float(merged.rmse_raw_new.quantile(0.95)),
+        "rmse_raw_legacy_p95": float(merged.rmse_raw_legacy.quantile(0.95)),
+        "rmse_repaired_new_p95": float(merged.rmse_repaired_new.quantile(0.95)),
+        "rmse_repaired_legacy_p95": float(merged.rmse_repaired_legacy.quantile(0.95)),
+        "improved_raw": int((merged.rmse_raw_delta < 0).sum()),
+        "worsened_raw": int((merged.rmse_raw_delta > 0).sum()),
+        "unchanged_raw": int((merged.rmse_raw_delta == 0).sum()),
+        "by_tenor_bucket": by_bucket,
+        "legacy_path": str(legacy_path),
+        "note": "Legacy bounds are [1e-6, 2.0]; new bounds are [eta_min, eta_max]. RMSE is in total variance w on each fit's liquid OTM strike set.",
+    }
+    return merged, overall
+
+
+def repricing_date_stats(frame: pd.DataFrame, date_str: str) -> dict:
+    subset = frame[frame.date == date_str]
+    if subset.empty:
+        return {
+            "fitmax_median": np.nan,
+            "fitmax_p95": np.nan,
+            "strikemedian_median": np.nan,
+            "strikemedian_p95": np.nan,
+        }
+    valid = subset[np.isfinite(subset.max_rel_error)]
+    if valid.empty:
+        return {
+            "fitmax_median": np.nan,
+            "fitmax_p95": np.nan,
+            "strikemedian_median": np.nan,
+            "strikemedian_p95": np.nan,
+        }
+    return {
+        "fitmax_median": float(valid.max_rel_error.median()),
+        "fitmax_p95": float(valid.max_rel_error.quantile(0.95)),
+        "strikemedian_median": float(valid.median_rel_error.median()),
+        "strikemedian_p95": float(valid.median_rel_error.quantile(0.95)),
+    }
+
+
+def calibration_by_date(
+    fits: dict,
+    data: pd.DataFrame,
+    butterfly_raw: pd.DataFrame,
+    butterfly_rep: pd.DataFrame,
+    calendar_raw: pd.DataFrame,
+    calendar_rep: pd.DataFrame,
+    repricing_raw: dict[str, pd.DataFrame],
+    repricing_rep: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
     rows = []
     for date, group in data.groupby("date", sort=True):
         date_str = date.strftime("%Y-%m-%d")
@@ -1001,10 +1418,8 @@ def calibration_by_date(fits: dict, data: pd.DataFrame, butterfly_raw: pd.DataFr
         bf_rep = butterfly_rep[(butterfly_rep.date == date_str) & butterfly_rep.violates_correct]
         cal_raw = calendar_raw[(calendar_raw.date == date_str) & calendar_raw.violates_calendar]
         cal_rep = calendar_rep[(calendar_rep.date == date_str) & calendar_rep.violates_calendar]
-        rp_raw = repricing_raw[repricing_raw.date == date_str]
-        rp_rep = repricing_rep[repricing_rep.date == date_str]
         qs = [fit["q"] for fit in date_fits]
-        rows.append({
+        row = {
             "date": date_str,
             "month": date.strftime("%Y-%m"),
             "n_expiries": int(group.groupby("expiry").ngroups),
@@ -1014,16 +1429,26 @@ def calibration_by_date(fits: dict, data: pd.DataFrame, butterfly_raw: pd.DataFr
             "quotes_liquid": int(group.liquid.sum()),
             "median_q": float(np.median(qs)) if qs else np.nan,
             "butterfly_raw": int(len(bf_raw)),
+            "butterfly_raw_strict": int(((butterfly_raw.date == date_str) & butterfly_raw.violates_correct_strict).sum()),
             "butterfly_repaired": int(len(bf_rep)),
+            "butterfly_repaired_strict": int(((butterfly_rep.date == date_str) & butterfly_rep.violates_correct_strict).sum()),
             "butterfly_printed_raw": int(((butterfly_raw.date == date_str) & butterfly_raw.violates_printed).sum()),
+            "butterfly_printed_raw_strict": int(((butterfly_raw.date == date_str) & butterfly_raw.violates_printed_strict).sum()),
             "butterfly_printed_repaired": int(((butterfly_rep.date == date_str) & butterfly_rep.violates_printed).sum()),
+            "butterfly_printed_repaired_strict": int(((butterfly_rep.date == date_str) & butterfly_rep.violates_printed_strict).sum()),
             "calendar_raw": int(len(cal_raw)),
+            "calendar_raw_strict": int(((calendar_raw.date == date_str) & calendar_raw.violates_calendar_strict).sum()),
             "calendar_repaired": int(len(cal_rep)),
-            "repricing_median_raw": float(rp_raw.median_rel_error.median()) if len(rp_raw) else np.nan,
-            "repricing_p95_raw": float(rp_raw.median_rel_error.quantile(0.95)) if len(rp_raw) else np.nan,
-            "repricing_median_repaired": float(rp_rep.median_rel_error.median()) if len(rp_rep) else np.nan,
-            "repricing_p95_repaired": float(rp_rep.median_rel_error.quantile(0.95)) if len(rp_rep) else np.nan,
-        })
+            "calendar_repaired_strict": int(((calendar_rep.date == date_str) & calendar_rep.violates_calendar_strict).sum()),
+        }
+        for basis in ("otm", "calls"):
+            raw_stats = repricing_date_stats(repricing_raw[basis], date_str)
+            rep_stats = repricing_date_stats(repricing_rep[basis], date_str)
+            for key, value in raw_stats.items():
+                row[f"repricing_{basis}_{key}_raw"] = value
+            for key, value in rep_stats.items():
+                row[f"repricing_{basis}_{key}_repaired"] = value
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -1144,11 +1569,18 @@ def monthly_sample_table(calibration: pd.DataFrame, sample_months: list[str]) ->
             "quotes_liquid": int(subset.quotes_liquid.sum()),
             "median_q": float(subset.median_q.median()) if subset.median_q.notna().any() else float("nan"),
             "butterfly_raw": int(subset.butterfly_raw.sum()),
+            "butterfly_raw_strict": int(subset.butterfly_raw_strict.sum()),
             "butterfly_repaired": int(subset.butterfly_repaired.sum()),
+            "butterfly_repaired_strict": int(subset.butterfly_repaired_strict.sum()),
             "calendar_raw": int(subset.calendar_raw.sum()),
+            "calendar_raw_strict": int(subset.calendar_raw_strict.sum()),
             "calendar_repaired": int(subset.calendar_repaired.sum()),
-            "repricing_median_raw": float(subset.repricing_median_raw.median()) if subset.repricing_median_raw.notna().any() else float("nan"),
-            "repricing_median_repaired": float(subset.repricing_median_repaired.median()) if subset.repricing_median_repaired.notna().any() else float("nan"),
+            "calendar_repaired_strict": int(subset.calendar_repaired_strict.sum()),
+            "repricing_otm_fitmax_median_raw": float(subset.repricing_otm_fitmax_median_raw.median()) if subset.repricing_otm_fitmax_median_raw.notna().any() else float("nan"),
+            "repricing_otm_fitmax_p95_raw": float(subset.repricing_otm_fitmax_p95_raw.median()) if subset.repricing_otm_fitmax_p95_raw.notna().any() else float("nan"),
+            "repricing_otm_strikemedian_median_raw": float(subset.repricing_otm_strikemedian_median_raw.median()) if subset.repricing_otm_strikemedian_median_raw.notna().any() else float("nan"),
+            "repricing_otm_fitmax_median_repaired": float(subset.repricing_otm_fitmax_median_repaired.median()) if subset.repricing_otm_fitmax_median_repaired.notna().any() else float("nan"),
+            "repricing_otm_strikemedian_median_repaired": float(subset.repricing_otm_strikemedian_median_repaired.median()) if subset.repricing_otm_strikemedian_median_repaired.notna().any() else float("nan"),
         })
     return rows
 
@@ -1183,29 +1615,37 @@ def print_summary(console: Console, params: dict, metrics: dict, sample_months: 
     table.add_column("Audit")
     table.add_column("Raw", justify="right")
     table.add_column("Repaired", justify="right")
-    table.add_row("butterfly (correct g)", f"{metrics['butterfly']['raw']['violations']:,}", f"{metrics['butterfly']['repaired']['violations']:,}")
-    table.add_row("butterfly (printed g)", f"{metrics['butterfly']['raw']['violations_printed']:,}", f"{metrics['butterfly']['repaired']['violations_printed']:,}")
+    table.add_row("butterfly correct strict", f"{metrics['butterfly']['raw']['violations_strict']:,}", f"{metrics['butterfly']['repaired']['violations_strict']:,}")
+    table.add_row("butterfly correct tol 1e-8", f"{metrics['butterfly']['raw']['violations']:,}", f"{metrics['butterfly']['repaired']['violations']:,}")
+    table.add_row("butterfly printed strict", f"{metrics['butterfly']['raw']['violations_printed_strict']:,}", f"{metrics['butterfly']['repaired']['violations_printed_strict']:,}")
+    table.add_row("butterfly printed tol 1e-8", f"{metrics['butterfly']['raw']['violations_printed']:,}", f"{metrics['butterfly']['repaired']['violations_printed']:,}")
     table.add_row("w <= 0", f"{metrics['butterfly']['raw']['w_nonpositive']:,}", f"{metrics['butterfly']['repaired']['w_nonpositive']:,}")
-    table.add_row("calendar", f"{metrics['calendar']['raw']['violations']:,}", f"{metrics['calendar']['repaired']['violations']:,}")
+    table.add_row("calendar strict", f"{metrics['calendar']['raw']['violations_strict']:,}", f"{metrics['calendar']['repaired']['violations_strict']:,}")
+    table.add_row("calendar tol 1e-8", f"{metrics['calendar']['raw']['violations']:,}", f"{metrics['calendar']['repaired']['violations']:,}")
     console.print(table)
 
-    table = Table(title="Repricing |C_BS - C_mkt| / C_mkt across fits")
-    table.add_column("Metric")
-    table.add_column("Raw", justify="right")
-    table.add_column("Repaired", justify="right")
-    for key, label in (
-        ("per_fit_max_median", "median of per-fit max"),
-        ("per_fit_max_p95", "p95 of per-fit max"),
-        ("per_fit_median_median", "median of per-fit median"),
-        ("per_fit_median_p95", "p95 of per-fit median"),
-        ("worst_fit_max", "worst per-fit max"),
-    ):
-        table.add_row(label, f"{metrics['repricing']['raw'][key]:.6f}", f"{metrics['repricing']['repaired'][key]:.6f}")
-    console.print(table)
+    for basis in ("otm", "calls"):
+        table = Table(title=f"Repricing {basis} |model - market| / market across fits")
+        table.add_column("Metric")
+        table.add_column("Raw", justify="right")
+        table.add_column("Repaired", justify="right")
+        for key, label in (
+            ("per_fit_max_median", "median of per-fit max"),
+            ("per_fit_max_p95", "p95 of per-fit max"),
+            ("per_fit_median_median", "median of per-fit median"),
+            ("per_fit_median_p95", "p95 of per-fit median"),
+            ("worst_fit_max", "worst per-fit max"),
+        ):
+            table.add_row(
+                label,
+                f"{metrics['repricing'][basis]['raw'][key]:.6f}",
+                f"{metrics['repricing'][basis]['repaired'][key]:.6f}",
+            )
+        console.print(table)
 
     if sample_months:
         table = Table(title="Sample months")
-        for col in ("month", "dates", "fits", "skipped", "quotes", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "reprice raw", "reprice rep"):
+        for col in ("month", "dates", "fits", "skipped", "quotes", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "otm fitmax raw", "otm strikemed raw", "otm fitmax rep"):
             table.add_column(col, justify="right" if col != "month" else "left")
         for row in sample_months:
             table.add_row(
@@ -1219,20 +1659,21 @@ def print_summary(console: Console, params: dict, metrics: dict, sample_months: 
                 f"{row['butterfly_repaired']}",
                 f"{row['calendar_raw']}",
                 f"{row['calendar_repaired']}",
-                f"{row['repricing_median_raw']:.4f}",
-                f"{row['repricing_median_repaired']:.4f}",
+                f"{row['repricing_otm_fitmax_median_raw']:.4f}",
+                f"{row['repricing_otm_strikemedian_median_raw']:.4f}",
+                f"{row['repricing_otm_fitmax_median_repaired']:.4f}",
             )
         console.print(table)
 
     if sample_dates:
         table = Table(title="Sample dates")
-        for col in ("date", "fits", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "reprice raw", "reprice rep"):
+        for col in ("date", "fits", "median q", "bf raw", "bf rep", "cal raw", "cal rep", "otm fitmax raw", "otm fitmax rep"):
             table.add_column(col, justify="right" if col != "date" else "left")
         for row in sample_dates:
             table.add_row(
                 row["date"], f"{row['n_fits']}", f"{row['median_q']:.4f}", f"{row['butterfly_raw']}",
                 f"{row['butterfly_repaired']}", f"{row['calendar_raw']}", f"{row['calendar_repaired']}",
-                f"{row['repricing_median_raw']:.4f}", f"{row['repricing_median_repaired']:.4f}",
+                f"{row['repricing_otm_fitmax_median_raw']:.4f}", f"{row['repricing_otm_fitmax_median_repaired']:.4f}",
             )
         console.print(table)
 
@@ -1241,6 +1682,9 @@ def run(args: argparse.Namespace) -> dict:
     console = Console(width=220)
     start = time.perf_counter()
     np.random.seed(args.seed)
+    if not (0.0 < args.eta_min < args.eta_max):
+        raise ValueError("require 0 < eta_min < eta_max")
+    bounds = svi_bounds(args.eta_min, args.eta_max)
     root = ROOT.resolve()
     out_resolved = args.out_dir.resolve()
     if out_resolved != root and root not in out_resolved.parents:
@@ -1267,7 +1711,7 @@ def run(args: argparse.Namespace) -> dict:
 
     console.print("[bold]Fitting raw SVI and repairing violations[/bold]")
     fit_start = time.perf_counter()
-    fits, svi_params, fit_history = make_fits(forwards, data, iv, args.min_strikes)
+    fits, svi_params, fit_history = make_fits(forwards, data, iv, args.min_strikes, bounds)
     fit_seconds = time.perf_counter() - fit_start
     console.print(f"  fits={len(fits)} skipped={len(fit_history['skipped'])} {fit_history['skip_reasons']} raw repair candidates={sum(1 for x in fit_history['repair'] if x['needed_repair'])}")
 
@@ -1275,27 +1719,58 @@ def run(args: argparse.Namespace) -> dict:
     butterfly_rep = butterfly_rows(fits, "repaired")
     calendar_raw = calendar_rows(fits, "raw")
     calendar_rep = calendar_rows(fits, "repaired")
-    repricing_raw, repricing_raw_summary = repricing_for_stage(fits, data[data.liquid], "raw")
-    repricing_rep, repricing_rep_summary = repricing_for_stage(fits, data[data.liquid], "repaired")
+    repricing_raw = {}
+    repricing_raw_summary = {}
+    repricing_rep = {}
+    repricing_rep_summary = {}
+    for basis in ("otm", "calls"):
+        repricing_raw[basis], repricing_raw_summary[basis] = repricing_for_stage(
+            fits, data[data.liquid], "raw", basis
+        )
+        repricing_rep[basis], repricing_rep_summary[basis] = repricing_for_stage(
+            fits, data[data.liquid], "repaired", basis
+        )
 
     bf_raw_summary = {
+        "violations_strict": int(butterfly_raw.violates_correct_strict.sum()),
         "violations": int(butterfly_raw.violates_correct.sum()),
+        "violations_printed_strict": int(butterfly_raw.violates_printed_strict.sum()),
         "violations_printed": int(butterfly_raw.violates_printed.sum()),
         "w_nonpositive": int(butterfly_raw.w_nonpositive.sum()),
+        "fits_with_violation_strict": int(butterfly_raw.groupby(["date", "expiry"]).violates_correct_strict.any().sum()),
         "fits_with_violation": int(butterfly_raw.groupby(["date", "expiry"]).violates_correct.any().sum()),
         "checks": int(len(butterfly_raw)),
         "min_g": float(butterfly_raw.g.min()) if np.isfinite(butterfly_raw.g).any() else float("nan"),
     }
     bf_rep_summary = {
+        "violations_strict": int(butterfly_rep.violates_correct_strict.sum()),
         "violations": int(butterfly_rep.violates_correct.sum()),
+        "violations_printed_strict": int(butterfly_rep.violates_printed_strict.sum()),
         "violations_printed": int(butterfly_rep.violates_printed.sum()),
         "w_nonpositive": int(butterfly_rep.w_nonpositive.sum()),
+        "fits_with_violation_strict": int(butterfly_rep.groupby(["date", "expiry"]).violates_correct_strict.any().sum()),
         "fits_with_violation": int(butterfly_rep.groupby(["date", "expiry"]).violates_correct.any().sum()),
         "checks": int(len(butterfly_rep)),
         "min_g": float(butterfly_rep.g.min()) if np.isfinite(butterfly_rep.g).any() else float("nan"),
     }
     calendar_raw_summary = calendar_summary(calendar_raw)
     calendar_rep_summary = calendar_summary(calendar_rep)
+
+    console.print("[bold]Checking forwards against CFFEX IF futures[/bold]")
+    futures, futures_stats = load_cffex_futures(args.raw_cffex)
+    forward_rows, forward_summary = forward_check(forwards, futures, futures_stats)
+    console.print(
+        f"  IF files={futures_stats['files']} rows={futures_stats['if_rows']:,} "
+        f"matched settle={forward_summary['matched_settle']}/{forward_summary['forwards']}"
+    )
+    bound_rows, bound_summary = svi_bound_comparison(
+        svi_params, args.legacy_svi_params, args.eta_min, args.eta_max
+    )
+    spacing = strike_spacing_summary(data)
+    console.print(
+        f"  eta bounds=[{args.eta_min}, {args.eta_max}] | "
+        f"strike spacing abs median={spacing['abs_median']:.1f} rel median={spacing['rel_median']:.4f}"
+    )
 
     surface = surface_frames(fits, "repaired")[["date", "expiry", "T", "F", "k", "w", "iv"]].merge(
         surface_frames(fits, "raw")[["date", "expiry", "k", "w", "iv"]].rename(columns={"w": "w_raw", "iv": "iv_raw"}),
@@ -1329,9 +1804,17 @@ def run(args: argparse.Namespace) -> dict:
             row = subset.iloc[0]
             sample_date_rows.append({key: (float(row[key]) if isinstance(row[key], (float, np.floating)) else row[key]) for key in (
                 "date", "n_fits", "n_skipped", "median_q", "butterfly_raw", "butterfly_repaired",
-                "calendar_raw", "calendar_repaired", "repricing_median_raw", "repricing_median_repaired",
+                "calendar_raw", "calendar_repaired", "repricing_otm_fitmax_median_raw",
+                "repricing_otm_fitmax_median_repaired",
             )})
     monthly_rows = monthly_sample_table(calibration, sample_months)
+    forward_months = {row["month"]: row for row in forward_summary["by_month"]}
+    for row in monthly_rows:
+        forward_month = forward_months.get(row["month"], {})
+        row["if_basis_settle_median"] = forward_month.get("if_basis_settle_median", float("nan"))
+        row["if_basis_close_median"] = forward_month.get("if_basis_close_median", float("nan"))
+        row["if_dev_settle_median"] = forward_month.get("if_dev_settle", {}).get("median", float("nan"))
+        row["if_dev_settle_p95"] = forward_month.get("if_dev_settle", {}).get("p95", float("nan"))
 
     metrics = {
         "quotes_total": filter_counts["quotes_total"],
@@ -1351,9 +1834,10 @@ def run(args: argparse.Namespace) -> dict:
         "parity": parity_stats,
         "iv": iv_stats,
         "repricing": {
-            "raw": repricing_raw_summary,
-            "repaired": repricing_rep_summary,
-            "note": "Per fit: max and median relative call repricing error on liquid strikes. Across fits: median and p95 of those per-fit statistics.",
+            "primary_basis": "otm",
+            "otm": {"raw": repricing_raw_summary["otm"], "repaired": repricing_rep_summary["otm"]},
+            "calls": {"raw": repricing_raw_summary["calls"], "repaired": repricing_rep_summary["calls"]},
+            "note": "Both bases use the common strikes with a liquid OTM quote and a liquid call. otm uses the traded OTM option (put below F, call at/above F); calls uses the traded call only. No synthetic call is constructed. Per fit: max and median relative repricing error; across fits: median and p95 of those statistics.",
         },
         "butterfly": {
             "raw": bf_raw_summary,
@@ -1369,6 +1853,21 @@ def run(args: argparse.Namespace) -> dict:
             "grid": {"start": -0.14, "stop": 0.14, "step": 0.01, "points": int(len(GRID_K))},
             "term_structure": "linear interpolation in total variance w at fixed k",
         },
+        "forward_check": forward_summary,
+        "svi_bounds": {
+            **bound_summary,
+            "eta_min": float(args.eta_min),
+            "eta_max": float(args.eta_max),
+            "strike_spacing": spacing,
+            "starting_points_retained": len(SVI_STARTS),
+            "start_reduction": False,
+            "other_bounds": {
+                "a": [-2.0, 2.0],
+                "b": [0.0, 5.0],
+                "rho": [-0.999, 0.999],
+                "m": [-2.0, 2.0],
+            },
+        },
         "sample_months": monthly_rows,
         "sample_dates": sample_date_rows,
         "input_hashes": input_hashes,
@@ -1383,10 +1882,25 @@ def run(args: argparse.Namespace) -> dict:
         "kband": args.kband,
         "min_days": args.min_days,
         "min_strikes": args.min_strikes,
-        "inputs": {"options": str(args.options), "shibor": str(args.shibor), "metadata": str(args.metadata)},
+        "inputs": {
+            "options": str(args.options),
+            "shibor": str(args.shibor),
+            "metadata": str(args.metadata),
+            "raw_cffex": str(args.raw_cffex),
+            "legacy_svi_params": str(args.legacy_svi_params) if args.legacy_svi_params is not None else None,
+        },
+        "price_note": "CFFEX fields: settle=今结算, close=今收盘; no settlement algorithm is inferred.",
         "rate_convention": "r(tau)=ln(1+L/100*tau*365/360)/tau from SHIBOR ACT/360 simple; linear in T, flat outside pillars",
         "forward_estimator": "volume-weighted mean of F_K=K+(C-P)/DF within |ln(F_K/median F_K)|<=0.05",
         "iv_bounds": [1e-4, 5.0],
+        "svi_bounds": {
+            "eta_min": float(args.eta_min),
+            "eta_max": float(args.eta_max),
+            "other": {"a": [-2.0, 2.0], "b": [0.0, 5.0], "rho": [-0.999, 0.999], "m": [-2.0, 2.0]},
+            "justification": "eta_min=0.01 lies below the observed strike spacing; eta_max=1.0 covers wide shallow smiles without the legacy 2.0 extreme.",
+            "starting_points_retained": len(SVI_STARTS),
+            "start_reduction": False,
+        },
         "svi_form": "a+b*(rho*(k-m)+sqrt((k-m)^2+eta^2)); b>=0, |rho|<1, eta>0",
         "svi_starting_points": [{"label": label, "b": b, "rho": rho, "m": m, "eta": eta} for label, b, rho, m, eta in SVI_STARTS],
         "svi_weights": "equal weights on OTM liquid quotes",
@@ -1417,10 +1931,22 @@ def run(args: argparse.Namespace) -> dict:
     calendar_raw.to_csv(output / "calendar_audit_raw.csv", index=False)
     calendar_rep.to_csv(output / "calendar_audit_repaired.csv", index=False)
     pd.concat([calendar_raw, calendar_rep], ignore_index=True).to_csv(output / "calendar_audit.csv", index=False)
-    repricing_raw.to_csv(output / "repricing_raw.csv", index=False)
-    repricing_rep.to_csv(output / "repricing.csv", index=False)
+    for basis in ("otm", "calls"):
+        repricing_raw[basis].to_csv(output / f"repricing_{basis}_raw.csv", index=False)
+        repricing_rep[basis].to_csv(output / f"repricing_{basis}_repaired.csv", index=False)
+    repricing_raw["otm"].to_csv(output / "repricing_raw.csv", index=False)
+    repricing_rep["otm"].to_csv(output / "repricing.csv", index=False)
+    repricing_raw["calls"].to_csv(output / "repricing_calls_raw.csv", index=False)
+    repricing_rep["calls"].to_csv(output / "repricing_calls.csv", index=False)
     svi_params.to_csv(output / "svi_params.csv", index=False)
     calibration.to_csv(output / "calibration_by_date.csv", index=False)
+    forward_rows.to_csv(output / "forward_check.csv", index=False)
+    pd.DataFrame(forward_summary["by_month"]).to_csv(output / "if_check_by_month.csv", index=False)
+    pd.DataFrame(forward_summary["by_month_bucket"]).to_csv(output / "if_basis_by_month_bucket.csv", index=False)
+    pd.DataFrame(forward_summary["by_bucket"]).to_csv(output / "if_basis_by_tenor.csv", index=False)
+    if len(bound_rows):
+        bound_rows.to_csv(output / "svi_bound_comparison.csv", index=False)
+        pd.DataFrame(bound_summary["by_tenor_bucket"]).to_csv(output / "svi_boundary_counts.csv", index=False)
     surface.to_csv(output / "surface.csv", index=False)
     term_structure.to_csv(output / "term_structure.csv", index=False)
     divergence.to_csv(output / "iv_divergence.csv", index=False)
