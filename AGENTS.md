@@ -8,7 +8,18 @@ Q3: forecast the PMI contraction regime P(d_{t+1}=1) using only F_t = {x_{i,s}: 
 
 ## Environment
 Python 3.13, managed with uv, dependencies pinned.
-uv venv --python 3.13 && source .venv/bin/activate
+uv sync --python 3.13 && source .venv/bin/activate
+./reproduce.sh --quick   # tests + compare only
+./reproduce.sh           # offline data check, tests, all approaches and post-hoc scripts, compare
+python code/compare.py   # writes results/comparison.html with every metrics.json included
+
+## Approach map
+- approach1_q1a_svi.py: Q1A SVI surface
+- approach2_q1b_neural.py: Q1B neural surface
+- approach3_q2a_mc.py: Q2A Monte Carlo pricing
+- approach4_q2b_deephedge.py: Q2B deep hedging
+- approach5_q3a_classical.py (+ posthoc): Q3A classical probit
+- approach6_q3b_sequence.py (+ posthoc): Q3B LSTM and leakage ablation
 
 ## Conventions
 Seed: --seed 42 by default, CLI-overridable; every stochastic step is seeded.
