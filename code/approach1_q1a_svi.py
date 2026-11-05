@@ -52,6 +52,18 @@ from scipy.optimize import brentq, least_squares
 from scipy.special import ndtr
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def rel_path(path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    try:
+        return str(candidate.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(candidate)
+
+
 DEFAULT_OPTIONS = ROOT / "data" / "clean" / "options_io.csv"
 DEFAULT_SHIBOR = ROOT / "data" / "clean" / "shibor.csv"
 DEFAULT_METADATA = ROOT / "data" / "metadata.json"
@@ -1431,7 +1443,7 @@ def svi_bound_comparison(
         "worsened_raw": int((merged.rmse_raw_delta > 0).sum()),
         "unchanged_raw": int((merged.rmse_raw_delta == 0).sum()),
         "by_tenor_bucket": by_bucket,
-        "legacy_path": str(legacy_path),
+        "legacy_path": rel_path(legacy_path),
         "note": "Legacy bounds are [1e-6, 2.0]; new bounds are [eta_min, eta_max]. RMSE is in total variance w on each fit's liquid OTM strike set.",
     }
     return merged, overall
@@ -1945,11 +1957,11 @@ def run(args: argparse.Namespace) -> dict:
         "min_days": args.min_days,
         "min_strikes": args.min_strikes,
         "inputs": {
-            "options": str(args.options),
-            "shibor": str(args.shibor),
-            "metadata": str(args.metadata),
-            "raw_cffex": str(args.raw_cffex),
-            "legacy_svi_params": str(args.legacy_svi_params) if args.legacy_svi_params is not None else None,
+            "options": rel_path(args.options),
+            "shibor": rel_path(args.shibor),
+            "metadata": rel_path(args.metadata),
+            "raw_cffex": rel_path(args.raw_cffex),
+            "legacy_svi_params": rel_path(args.legacy_svi_params),
         },
         "price_note": "CFFEX fields: settle=今结算, close=今收盘; no settlement algorithm is inferred.",
         "rate_convention": "r(tau)=ln(1+L/100*tau*365/360)/tau from SHIBOR ACT/360 simple; linear in T, flat outside pillars",
@@ -1968,7 +1980,7 @@ def run(args: argparse.Namespace) -> dict:
         "svi_weights": "equal weights on OTM liquid quotes",
         "butterfly_grid": {"start": -0.14, "stop": 0.14, "step": 0.01},
         "surface_grid": {"start": -0.20, "stop": 0.20, "step": 0.02},
-        "out_dir": str(args.out_dir),
+        "out_dir": rel_path(args.out_dir),
     }
     history = {
         **fit_history,

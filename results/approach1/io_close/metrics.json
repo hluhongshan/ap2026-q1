@@ -10,10 +10,10 @@
     "min_days": 7,
     "min_strikes": 6,
     "inputs": {
-      "options": "/Users/luhao/E-Study/ap2026/data/clean/options_io.csv",
-      "shibor": "/Users/luhao/E-Study/ap2026/data/clean/shibor.csv",
-      "metadata": "/Users/luhao/E-Study/ap2026/data/metadata.json",
-      "raw_cffex": "/Users/luhao/E-Study/ap2026/data/raw/cffex",
+      "options": "data/clean/options_io.csv",
+      "shibor": "data/clean/shibor.csv",
+      "metadata": "data/metadata.json",
+      "raw_cffex": "data/raw/cffex",
       "legacy_svi_params": ".cache/legacy/io_close_svi_params.csv"
     },
     "price_note": "CFFEX fields: settle=\u4eca\u7ed3\u7b97, close=\u4eca\u6536\u76d8; no settlement algorithm is inferred.",

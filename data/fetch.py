@@ -19,6 +19,18 @@ from rich.console import Console
 from rich.table import Table
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def rel_path(path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    try:
+        return str(candidate.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(candidate)
+
+
 RAW = ROOT / "data" / "raw"
 CLEAN = ROOT / "data" / "clean"
 CFFEX_DIR = RAW / "cffex"
@@ -101,7 +113,7 @@ def record(name: str, status: str, detail: str = "", path: str | None = None):
             "interface": name,
             "status": status,
             "detail": detail,
-            "path": path,
+            "path": rel_path(path),
             "retrieved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
     )

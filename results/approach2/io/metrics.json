@@ -15,10 +15,10 @@
       1.0
     ],
     "inputs": {
-      "options": "/Users/luhao/E-Study/ap2026/data/clean/options_io.csv",
-      "shibor": "/Users/luhao/E-Study/ap2026/data/clean/shibor.csv",
-      "metadata": "/Users/luhao/E-Study/ap2026/data/metadata.json",
-      "approach1_dir": "/Users/luhao/E-Study/ap2026/results/approach1/io"
+      "options": "data/clean/options_io.csv",
+      "shibor": "data/clean/shibor.csv",
+      "metadata": "data/metadata.json",
+      "approach1_dir": "results/approach1/io"
     },
     "sample_dates": [
       "2024-03-14",
@@ -67,8 +67,8 @@
     "price_note": "CFFEX fields: settle=\u4eca\u7ed3\u7b97, close=\u4eca\u6536\u76d8; no settlement algorithm is inferred.",
     "rate_convention": "reused from approach1 (SHIBOR ACT/360 simple converted to continuous zero on ACT/365)",
     "forward_estimator": "reused from approach1 (volume-weighted parity forward within |ln(F_K/median)| <= 0.05)",
-    "out_dir": "/Users/luhao/E-Study/ap2026/results/approach2/io",
-    "cache_dir": "/Users/luhao/E-Study/ap2026/.cache/approach2_cache_cold",
+    "out_dir": "results/approach2/io",
+    "cache_dir": ".cache/approach2_cache_cold",
     "worker_isolation": {
       "method": "spawn one fresh process per neural fit",
       "timeout_seconds": 120.0,
@@ -232,7 +232,7 @@
       "start_info": {
         "available": {
           "available": true,
-          "path": "/Users/luhao/E-Study/ap2026/results/approach1/io/svi_params.csv",
+          "path": "results/approach1/io/svi_params.csv",
           "rows": 693
         },
         "from_approach1": 30,
@@ -2017,7 +2017,7 @@
       "available": true,
       "source": {
         "available": true,
-        "path": "/Users/luhao/E-Study/ap2026/results/approach1/io/svi_params.csv",
+        "path": "results/approach1/io/svi_params.csv",
         "rows": 693
       },
       "basis": "approach1 repaired SVI parameters from svi_params.csv, re-priced on this run's OTM quote set",
@@ -2118,7 +2118,7 @@
     },
     "cache": {
       "misses": 80,
-      "dir": "/Users/luhao/E-Study/ap2026/.cache/approach2_cache_cold"
+      "dir": ".cache/approach2_cache_cold"
     },
     "runtime": {
       "fit_seconds": 798.3982177510043,
@@ -5361,6 +5361,6 @@
       },
       "convention": "simple ACT/360 SHIBOR converted to continuous zero rate on ACT/365 T (reused from approach1)"
     },
-    "log_path": "/Users/luhao/E-Study/ap2026/.cache/approach2_q1b.log"
+    "log_path": ".cache/approach2_q1b.log"
   }
 }

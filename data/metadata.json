@@ -201,56 +201,56 @@
       "interface": "CFFEX daily quotes",
       "status": "ok",
       "detail": "downloaded=0 skipped=128 non200=0 noncsv200=3 errors=0",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/cffex",
+      "path": "data/raw/cffex",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "CSI 300 close",
       "status": "skipped",
       "detail": "using cached source=akshare.stock_zh_index_daily",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/csi300.csv",
+      "path": "data/raw/csi300.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "Shibor",
       "status": "skipped",
       "detail": "cached shibor.csv",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/shibor.csv",
+      "path": "data/raw/shibor.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "LPR",
       "status": "skipped",
       "detail": "cached lpr.csv",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/lpr.csv",
+      "path": "data/raw/lpr.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "SSE option current day",
       "status": "skipped",
       "detail": "cached option_current_day_sse.csv",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/option_current_day_sse.csv",
+      "path": "data/raw/option_current_day_sse.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "ETF 510050",
       "status": "skipped",
       "detail": "using cached source=akshare.fund_etf_hist_sina",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510050.csv",
+      "path": "data/raw/etf_510050.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "ETF 510300",
       "status": "skipped",
       "detail": "using cached source=akshare.fund_etf_hist_sina",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/etf_510300.csv",
+      "path": "data/raw/etf_510300.csv",
       "retrieved_at": "2026-11-04T17:47:59+08:00"
     },
     {
       "interface": "Sina option cross-check",
       "status": "skipped",
       "detail": "cached comparison",
-      "path": "/Users/luhao/E-Study/ap2026/data/raw/sina_comparison.csv",
+      "path": "data/raw/sina_comparison.csv",
       "retrieved_at": "2026-11-04T17:48:00+08:00"
     }
   ],
@@ -1334,280 +1334,280 @@
         "interface": "macro_china_pmi",
         "status": "skipped",
         "detail": "cached macro_china_pmi.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_pmi.csv",
+        "path": "data/raw/q3/macro_china_pmi.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_non_man_pmi",
         "status": "skipped",
         "detail": "cached macro_china_non_man_pmi.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_non_man_pmi.csv",
+        "path": "data/raw/q3/macro_china_non_man_pmi.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_cx_pmi_yearly",
         "status": "skipped",
         "detail": "cached macro_china_cx_pmi_yearly.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cx_pmi_yearly.csv",
+        "path": "data/raw/q3/macro_china_cx_pmi_yearly.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_cx_services_pmi_yearly",
         "status": "skipped",
         "detail": "cached macro_china_cx_services_pmi_yearly.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cx_services_pmi_yearly.csv",
+        "path": "data/raw/q3/macro_china_cx_services_pmi_yearly.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_cpi",
         "status": "skipped",
         "detail": "cached macro_china_cpi.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cpi.csv",
+        "path": "data/raw/q3/macro_china_cpi.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_cpi_yearly",
         "status": "skipped",
         "detail": "cached macro_china_cpi_yearly.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cpi_yearly.csv",
+        "path": "data/raw/q3/macro_china_cpi_yearly.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_ppi",
         "status": "skipped",
         "detail": "cached macro_china_ppi.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_ppi.csv",
+        "path": "data/raw/q3/macro_china_ppi.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_ppi_yearly",
         "status": "skipped",
         "detail": "cached macro_china_ppi_yearly.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_ppi_yearly.csv",
+        "path": "data/raw/q3/macro_china_ppi_yearly.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_money_supply",
         "status": "skipped",
         "detail": "cached macro_china_money_supply.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_money_supply.csv",
+        "path": "data/raw/q3/macro_china_money_supply.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_shrzgm",
         "status": "skipped",
         "detail": "cached macro_china_shrzgm.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_shrzgm.csv",
+        "path": "data/raw/q3/macro_china_shrzgm.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_new_financial_credit",
         "status": "skipped",
         "detail": "cached macro_china_new_financial_credit.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_new_financial_credit.csv",
+        "path": "data/raw/q3/macro_china_new_financial_credit.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_lpr",
         "status": "skipped",
         "detail": "cached macro_china_lpr.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_lpr.csv",
+        "path": "data/raw/q3/macro_china_lpr.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_consumer_goods_retail",
         "status": "skipped",
         "detail": "cached macro_china_consumer_goods_retail.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_consumer_goods_retail.csv",
+        "path": "data/raw/q3/macro_china_consumer_goods_retail.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_industrial_production_yoy",
         "status": "skipped",
         "detail": "cached macro_china_industrial_production_yoy.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_industrial_production_yoy.csv",
+        "path": "data/raw/q3/macro_china_industrial_production_yoy.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_gyzjz",
         "status": "skipped",
         "detail": "cached macro_china_gyzjz.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gyzjz.csv",
+        "path": "data/raw/q3/macro_china_gyzjz.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_gdzctz",
         "status": "skipped",
         "detail": "cached macro_china_gdzctz.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdzctz.csv",
+        "path": "data/raw/q3/macro_china_gdzctz.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_exports_yoy",
         "status": "skipped",
         "detail": "cached macro_china_exports_yoy.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_exports_yoy.csv",
+        "path": "data/raw/q3/macro_china_exports_yoy.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_imports_yoy",
         "status": "skipped",
         "detail": "cached macro_china_imports_yoy.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_imports_yoy.csv",
+        "path": "data/raw/q3/macro_china_imports_yoy.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_trade_balance",
         "status": "skipped",
         "detail": "cached macro_china_trade_balance.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_trade_balance.csv",
+        "path": "data/raw/q3/macro_china_trade_balance.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_hgjck",
         "status": "skipped",
         "detail": "cached macro_china_hgjck.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_hgjck.csv",
+        "path": "data/raw/q3/macro_china_hgjck.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_xfzxx",
         "status": "skipped",
         "detail": "cached macro_china_xfzxx.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_xfzxx.csv",
+        "path": "data/raw/q3/macro_china_xfzxx.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_society_electricity",
         "status": "skipped",
         "detail": "cached macro_china_society_electricity.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_society_electricity.csv",
+        "path": "data/raw/q3/macro_china_society_electricity.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_gdp",
         "status": "skipped",
         "detail": "cached macro_china_gdp.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdp.csv",
+        "path": "data/raw/q3/macro_china_gdp.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_gdp_yearly",
         "status": "skipped",
         "detail": "cached macro_china_gdp_yearly.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdp_yearly.csv",
+        "path": "data/raw/q3/macro_china_gdp_yearly.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_real_estate",
         "status": "skipped",
         "detail": "cached macro_china_real_estate.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_real_estate.csv",
+        "path": "data/raw/q3/macro_china_real_estate.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_enterprise_boom_index",
         "status": "skipped",
         "detail": "cached macro_china_enterprise_boom_index.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_enterprise_boom_index.csv",
+        "path": "data/raw/q3/macro_china_enterprise_boom_index.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_fx_gold",
         "status": "skipped",
         "detail": "cached macro_china_fx_gold.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_fx_gold.csv",
+        "path": "data/raw/q3/macro_china_fx_gold.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_urban_unemployment",
         "status": "skipped",
         "detail": "cached macro_china_urban_unemployment.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_urban_unemployment.csv",
+        "path": "data/raw/q3/macro_china_urban_unemployment.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_czsr",
         "status": "skipped",
         "detail": "cached macro_china_czsr.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_czsr.csv",
+        "path": "data/raw/q3/macro_china_czsr.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_qyspjg",
         "status": "skipped",
         "detail": "cached macro_china_qyspjg.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_qyspjg.csv",
+        "path": "data/raw/q3/macro_china_qyspjg.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_stock_market_cap",
         "status": "skipped",
         "detail": "cached macro_china_stock_market_cap.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_stock_market_cap.csv",
+        "path": "data/raw/q3/macro_china_stock_market_cap.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_commodity_price_index",
         "status": "skipped",
         "detail": "cached macro_china_commodity_price_index.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_commodity_price_index.csv",
+        "path": "data/raw/q3/macro_china_commodity_price_index.csv",
         "retrieved_at": "2026-11-05T13:38:37+08:00"
       },
       {
         "interface": "macro_china_society_traffic_volume",
         "status": "failed",
         "detail": "attempt 1: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=124&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)'))) | attempt 2: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=186&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)'))) | attempt 3: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=31&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)')))",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_society_traffic_volume.csv",
+        "path": "data/raw/q3/macro_china_society_traffic_volume.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "macro_china_central_bank_balance",
         "status": "skipped",
         "detail": "cached macro_china_central_bank_balance.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_central_bank_balance.csv",
+        "path": "data/raw/q3/macro_china_central_bank_balance.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "macro_china_bank_financing",
         "status": "skipped",
         "detail": "cached macro_china_bank_financing.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_bank_financing.csv",
+        "path": "data/raw/q3/macro_china_bank_financing.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "macro_china_retail_price_index",
         "status": "skipped",
         "detail": "cached macro_china_retail_price_index.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_retail_price_index.csv",
+        "path": "data/raw/q3/macro_china_retail_price_index.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "macro_china_market_margin_sh",
         "status": "skipped",
         "detail": "cached macro_china_market_margin_sh.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_market_margin_sh.csv",
+        "path": "data/raw/q3/macro_china_market_margin_sh.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "bond_zh_us_rate",
         "status": "skipped",
         "detail": "cached bond_zh_us_rate.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/bond_zh_us_rate.csv",
+        "path": "data/raw/q3/bond_zh_us_rate.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "macro_china_nbs_nation:industrial_profit",
         "status": "skipped",
         "detail": "cached macro_china_nbs_industrial_profit.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_nbs_industrial_profit.csv",
+        "path": "data/raw/q3/macro_china_nbs_industrial_profit.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       },
       {
         "interface": "committed SHIBOR",
         "status": "ok",
         "detail": "using data/clean/shibor.csv",
-        "path": "/Users/luhao/E-Study/ap2026/data/clean/shibor.csv",
+        "path": "data/clean/shibor.csv",
         "retrieved_at": "2026-11-05T13:39:36+08:00"
       }
     ],

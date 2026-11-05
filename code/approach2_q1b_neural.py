@@ -1260,7 +1260,7 @@ def run_neural_fit_cached(
         "lambda1": float(lambda1),
         "lambda2": float(lambda2),
         "seed": int(seed),
-        "cache_dir": str(cache_dir),
+        "cache_dir": A1.rel_path(cache_dir),
         "cache_key": key,
         "config": config,
     }
@@ -1938,7 +1938,7 @@ def approach1_params(approach1_dir: Path) -> tuple[pd.DataFrame | None, dict]:
     frame = pd.read_csv(path)
     frame["date"] = pd.to_datetime(frame.date).dt.strftime("%Y-%m-%d")
     frame["expiry"] = pd.to_datetime(frame.expiry).dt.strftime("%Y-%m-%d")
-    return frame, {"available": True, "path": str(path), "rows": int(len(frame))}
+    return frame, {"available": True, "path": A1.rel_path(path), "rows": int(len(frame))}
 
 
 def compare_with_approach1(
@@ -2108,10 +2108,10 @@ def make_metrics_payload(
         "min_strikes": args.min_strikes,
         "eta_bounds": [args.eta_min, args.eta_max],
         "inputs": {
-            "options": str(args.options),
-            "shibor": str(args.shibor),
-            "metadata": str(args.metadata),
-            "approach1_dir": str(args.approach1_dir),
+            "options": A1.rel_path(args.options),
+            "shibor": A1.rel_path(args.shibor),
+            "metadata": A1.rel_path(args.metadata),
+            "approach1_dir": A1.rel_path(args.approach1_dir),
         },
         "sample_dates": [pd.Timestamp(date).strftime("%Y-%m-%d") for date in sample_dates],
         "sample_date_rule": (
@@ -2161,8 +2161,8 @@ def make_metrics_payload(
         "price_note": "CFFEX fields: settle=今结算, close=今收盘; no settlement algorithm is inferred.",
         "rate_convention": "reused from approach1 (SHIBOR ACT/360 simple converted to continuous zero on ACT/365)",
         "forward_estimator": "reused from approach1 (volume-weighted parity forward within |ln(F_K/median)| <= 0.05)",
-        "out_dir": str(args.out_dir),
-        "cache_dir": str(cache_dir),
+        "out_dir": A1.rel_path(args.out_dir),
+        "cache_dir": A1.rel_path(cache_dir),
         "worker_isolation": {
             "method": "spawn one fresh process per neural fit",
             "timeout_seconds": float(args.fit_timeout_seconds),
@@ -2231,7 +2231,7 @@ def make_metrics_payload(
         "comparison_approach1": comparison,
         "failed_fits": failed_fits,
         "determinism_check": determinism,
-        "cache": {**cache_stats, "dir": str(cache_dir)},
+        "cache": {**cache_stats, "dir": A1.rel_path(cache_dir)},
         "runtime": {
             "fit_seconds": float(fit_seconds),
             "total_seconds": float(total_seconds),
@@ -2519,7 +2519,7 @@ def run(args: argparse.Namespace) -> dict:
             "pillars": A1.PILLAR_DAYS,
             "convention": "simple ACT/360 SHIBOR converted to continuous zero rate on ACT/365 T (reused from approach1)",
         },
-        "log_path": str(args.log_path),
+        "log_path": A1.rel_path(args.log_path),
     }
 
     console.print("[bold]Writing outputs[/bold]")
