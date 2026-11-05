@@ -41,8 +41,8 @@ fi
 run_step "tests" python -m unittest discover -s tests -v
 
 if [[ "$QUICK" -eq 0 ]]; then
-  run_step "approach1 Q1A settle" python code/approach1_q1a_svi.py --price-col settle --out-dir results/approach1/io
-  run_step "approach1 Q1A close" python code/approach1_q1a_svi.py --price-col close --out-dir results/approach1/io_close
+  run_step "approach1 Q1A settle" python code/approach1_q1a_svi.py --price-col settle --legacy-svi-params data/legacy/io_settle_svi_params.csv --out-dir results/approach1/io
+  run_step "approach1 Q1A close" python code/approach1_q1a_svi.py --price-col close --legacy-svi-params data/legacy/io_close_svi_params.csv --out-dir results/approach1/io_close
   # results/approach2/io is a historical run from commit 664a716; only io_scaled is reproduced.
   run_step "approach2 Q1B neural" python code/approach2_q1b_neural.py
   run_step "approach3 Q2A Monte Carlo" python code/approach3_q2a_mc.py

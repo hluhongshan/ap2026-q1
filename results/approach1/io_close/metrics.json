@@ -14,7 +14,7 @@
       "shibor": "data/clean/shibor.csv",
       "metadata": "data/metadata.json",
       "raw_cffex": "data/raw/cffex",
-      "legacy_svi_params": ".cache/legacy/io_close_svi_params.csv"
+      "legacy_svi_params": "data/legacy/io_close_svi_params.csv"
     },
     "price_note": "CFFEX fields: settle=\u4eca\u7ed3\u7b97, close=\u4eca\u6536\u76d8; no settlement algorithm is inferred.",
     "rate_convention": "r(tau)=ln(1+L/100*tau*365/360)/tau from SHIBOR ACT/360 simple; linear in T, flat outside pillars",
@@ -1325,7 +1325,7 @@
           "delta_rmse_repaired_median": 4.550551882026387e-05
         }
       ],
-      "legacy_path": ".cache/legacy/io_close_svi_params.csv",
+      "legacy_path": "data/legacy/io_close_svi_params.csv",
       "note": "Legacy bounds are [1e-6, 2.0]; new bounds are [eta_min, eta_max]. RMSE is in total variance w on each fit's liquid OTM strike set.",
       "strike_spacing": {
         "abs_median": 50.0,
