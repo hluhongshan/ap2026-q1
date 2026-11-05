@@ -132,7 +132,7 @@
     },
     "data/clean/macro_panel.csv": {
       "path": "data/clean/macro_panel.csv",
-      "source": "Q3 monthly macro panel from akshare odds and committed SHIBOR",
+      "source": "Q3 monthly macro panel from akshare macro_china interfaces and committed SHIBOR",
       "interface": "see macro_meta.csv",
       "retrieval_time": "2026-11-05T13:39:36+08:00",
       "schema": [
