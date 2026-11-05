@@ -63,6 +63,8 @@ SINA_COLUMNS = [
     "status",
     "error",
 ]
+FUTURES_SYMBOLS = {"IF": "IF0", "RB": "RB0", "CU": "CU0", "SC": "SC0"}
+FUTURES_COLUMNS = ["date", "open", "high", "low", "close", "volume", "oi"]
 
 log = logging.getLogger("q1-fetch")
 console = Console()
@@ -290,6 +292,199 @@ def fetch_etf(code: str):
             failures.append(f"{name}: {message}")
             log.error("ETF %s %s failed: %s", code, name, message)
     record(f"ETF {code}", "failed", " | ".join(failures), str(path))
+
+
+def normalize_futures(frame: pd.DataFrame) -> pd.DataFrame:
+    chinese = {
+        "日期": "date",
+        "开盘价": "open",
+        "最高价": "high",
+        "最低价": "low",
+        "收盘价": "close",
+        "成交量": "volume",
+        "持仓量": "oi",
+    }
+    english = {
+        "date": "date",
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "volume": "volume",
+        "hold": "oi",
+        "oi": "oi",
+    }
+    mapping = chinese if "日期" in frame.columns else english
+    missing = [column for column in mapping if column not in frame.columns]
+    if missing:
+        raise ValueError(f"futures raw missing columns: {missing}")
+    out = frame[list(mapping)].rename(columns=mapping).copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    for column in FUTURES_COLUMNS[1:]:
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    out = out.dropna(subset=["date", "close"]).drop_duplicates("date", keep="last")
+    return out.sort_values("date").reset_index(drop=True)[FUTURES_COLUMNS]
+
+
+def verify_futures(code: str, frame: pd.DataFrame) -> dict:
+    duplicates = int(frame.duplicated("date").sum())
+    price_columns = ["open", "high", "low", "close"]
+    nonpositive = int((frame[price_columns] <= 0).sum().sum())
+    missing_prices = int(frame[price_columns].isna().sum().sum())
+    start = pd.Timestamp(frame["date"].min())
+    end = pd.Timestamp(frame["date"].max())
+    span_days = int((end - start).days)
+    years = span_days / 365.25
+    checks = {
+        "dataset": code,
+        "rows": int(len(frame)),
+        "start": start.date().isoformat(),
+        "end": end.date().isoformat(),
+        "span_days": span_days,
+        "years": years,
+        "duplicate_dates": duplicates,
+        "nonpositive_prices": nonpositive,
+        "missing_prices": missing_prices,
+        "at_least_5_years": bool(years >= 5.0),
+        "no_duplicate_dates": bool(duplicates == 0),
+        "positive_prices": bool(nonpositive == 0 and missing_prices == 0),
+    }
+    return checks
+
+
+def fetch_futures() -> tuple[list[tuple[str, str, pd.DataFrame]], list[dict]]:
+    import akshare as ak
+
+    RAW.mkdir(parents=True, exist_ok=True)
+    CLEAN.mkdir(parents=True, exist_ok=True)
+    results: list[tuple[str, str, pd.DataFrame]] = []
+    assertions: list[dict] = []
+    for code, symbol in FUTURES_SYMBOLS.items():
+        raw_path = RAW / f"futures_{code}.csv"
+        source_path = RAW / f"futures_{code}_source.txt"
+        source = "cached"
+        if raw_path.exists() and raw_path.stat().st_size > 0:
+            if source_path.exists():
+                source = source_path.read_text(encoding="utf-8").strip()
+            record(f"Futures {code}", "skipped", f"using cached source={source}", str(raw_path))
+            log.info("Futures %s skipped; cached source=%s", code, source)
+            raw = pd.read_csv(raw_path)
+        else:
+            attempts = [
+                (
+                    "akshare.futures_main_sina",
+                    lambda: ak.futures_main_sina(
+                        symbol=symbol, start_date="20050101", end_date="22220101"
+                    ),
+                ),
+                ("akshare.futures_zh_daily_sina", lambda: ak.futures_zh_daily_sina(symbol=symbol)),
+            ]
+            failures = []
+            raw = None
+            for name, call in attempts:
+                try:
+                    with time_limit(180):
+                        frame = call()
+                    if frame is None or len(frame) == 0:
+                        raise ValueError("empty response")
+                    frame.to_csv(raw_path, index=False, encoding="utf-8")
+                    source_path.write_text(name, encoding="utf-8")
+                    source = name
+                    raw = frame
+                    record(f"Futures {code}", "ok", f"source={name} rows={len(frame)}", str(raw_path))
+                    log.info("Futures %s source used: %s (%d rows)", code, name, len(frame))
+                    break
+                except Exception as exc:
+                    message = f"{type(exc).__name__}: {exc}"
+                    failures.append(f"{name}: {message}")
+                    log.error("Futures %s %s failed: %s", code, name, message)
+            if raw is None:
+                record(f"Futures {code}", "failed", " | ".join(failures), str(raw_path))
+                assertions.append(
+                    {
+                        "dataset": code,
+                        "rows": 0,
+                        "start": None,
+                        "end": None,
+                        "span_days": 0,
+                        "years": 0.0,
+                        "duplicate_dates": 0,
+                        "nonpositive_prices": 0,
+                        "missing_prices": 0,
+                        "at_least_5_years": False,
+                        "no_duplicate_dates": False,
+                        "positive_prices": False,
+                    }
+                )
+                continue
+        clean = normalize_futures(raw)
+        clean_path = CLEAN / f"futures_{code}.csv"
+        clean.to_csv(clean_path, index=False, encoding="utf-8")
+        checks = verify_futures(code, clean)
+        assertions.append(checks)
+        results.append((code, source, clean))
+        log.info(
+            "Futures %s clean rows=%d %s..%s years=%.2f",
+            code,
+            checks["rows"],
+            checks["start"],
+            checks["end"],
+            checks["years"],
+        )
+    return results, assertions
+
+
+def update_futures_metadata(results: list[tuple[str, str, pd.DataFrame]], assertions: list[dict]):
+    if not METADATA.exists():
+        raise FileNotFoundError(f"metadata missing: {METADATA}")
+    metadata = json.loads(METADATA.read_text(encoding="utf-8"))
+    artifacts = metadata.setdefault("artifacts", {})
+    for code, source, frame in results:
+        relative = f"data/clean/futures_{code}.csv"
+        artifacts[relative] = build_artifact(
+            ROOT / relative,
+            f"Sina main continuous futures {FUTURES_SYMBOLS[code]} ({code}); interface={source}",
+            source,
+            FUTURES_COLUMNS,
+            len(frame),
+        )
+    metadata["futures_assertions"] = assertions
+    metadata["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    METADATA.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def print_futures_report(results: list[tuple[str, str, pd.DataFrame]], assertions: list[dict]):
+    table = Table(title="Q2 futures snapshots")
+    table.add_column("Dataset")
+    table.add_column("Source")
+    table.add_column("Rows", justify="right")
+    table.add_column("Start")
+    table.add_column("End")
+    table.add_column("Years", justify="right")
+    for code, source, frame in results:
+        table.add_row(
+            code,
+            source,
+            f"{len(frame):,}",
+            str(frame["date"].iloc[0]),
+            str(frame["date"].iloc[-1]),
+            f"{(pd.Timestamp(frame['date'].iloc[-1]) - pd.Timestamp(frame['date'].iloc[0])).days / 365.25:.2f}",
+        )
+    console.print(table)
+
+    check_table = Table(title="Futures assertions")
+    check_table.add_column("Dataset")
+    check_table.add_column("5y")
+    check_table.add_column("No duplicate dates")
+    check_table.add_column("Positive prices")
+    for item in assertions:
+        check_table.add_row(
+            item["dataset"],
+            "PASS" if item["at_least_5_years"] else "FAIL",
+            "PASS" if item["no_duplicate_dates"] else "FAIL",
+            "PASS" if item["positive_prices"] else "FAIL",
+        )
+    console.print(check_table)
 
 
 def load_csi() -> tuple[pd.DataFrame, str]:
@@ -815,10 +1010,44 @@ def online():
     )
     print_report(month_report, date_report, sina, build_stats, assertions)
     failed = [item["name"] for item in assertions if not item["passed"]]
+    futures_results, futures_assertions = fetch_futures()
+    update_futures_metadata(futures_results, futures_assertions)
+    print_futures_report(futures_results, futures_assertions)
+    failed += [
+        f"{item['dataset']} futures"
+        for item in futures_assertions
+        if not (
+            item["at_least_5_years"]
+            and item["no_duplicate_dates"]
+            and item["positive_prices"]
+        )
+    ]
     if failed:
         log.error("assertion failures: %s", failed)
         return 1
     log.info("online fetch complete; all assertions passed")
+    return 0
+
+
+def futures_only():
+    RAW.mkdir(parents=True, exist_ok=True)
+    CLEAN.mkdir(parents=True, exist_ok=True)
+    futures_results, futures_assertions = fetch_futures()
+    update_futures_metadata(futures_results, futures_assertions)
+    print_futures_report(futures_results, futures_assertions)
+    failed = [
+        f"{item['dataset']} futures"
+        for item in futures_assertions
+        if not (
+            item["at_least_5_years"]
+            and item["no_duplicate_dates"]
+            and item["positive_prices"]
+        )
+    ]
+    if failed:
+        log.error("assertion failures: %s", failed)
+        return 1
+    log.info("futures fetch complete; all assertions passed")
     return 0
 
 
@@ -856,9 +1085,14 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--online", action="store_true", help="download missing raw data and rebuild clean artifacts")
     group.add_argument("--offline", action="store_true", help="verify clean artifacts against metadata checksums")
+    group.add_argument("--futures", action="store_true", help="fetch or refresh only the Q2 futures snapshots")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    return online() if args.online else offline()
+    if args.online:
+        return online()
+    if args.offline:
+        return offline()
+    return futures_only()
 
 
 if __name__ == "__main__":

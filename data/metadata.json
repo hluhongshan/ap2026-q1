@@ -61,6 +61,74 @@
       ],
       "rows": 30,
       "sha256": "f3febf22d1f1e34f2826af8a27b1062118cbb32a563fa5db8a40087fd88ec2a8"
+    },
+    "data/clean/futures_IF.csv": {
+      "path": "data/clean/futures_IF.csv",
+      "source": "Sina main continuous futures IF0 (IF); interface=akshare.futures_main_sina",
+      "interface": "akshare.futures_main_sina",
+      "retrieval_time": "2026-11-05T12:16:24+08:00",
+      "schema": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "oi"
+      ],
+      "rows": 2376,
+      "sha256": "95c8caeb6a0a6c32783625bf00e8400ab481987fcfcd835a93b6f57f0cfa2369"
+    },
+    "data/clean/futures_RB.csv": {
+      "path": "data/clean/futures_RB.csv",
+      "source": "Sina main continuous futures RB0 (RB); interface=akshare.futures_main_sina",
+      "interface": "akshare.futures_main_sina",
+      "retrieval_time": "2026-11-05T12:16:24+08:00",
+      "schema": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "oi"
+      ],
+      "rows": 4274,
+      "sha256": "82986de07f9a15dd2b8317635bd360edf40d2fe424d9d4192672f28cdef57f23"
+    },
+    "data/clean/futures_CU.csv": {
+      "path": "data/clean/futures_CU.csv",
+      "source": "Sina main continuous futures CU0 (CU); interface=akshare.futures_main_sina",
+      "interface": "akshare.futures_main_sina",
+      "retrieval_time": "2026-11-05T12:16:24+08:00",
+      "schema": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "oi"
+      ],
+      "rows": 5310,
+      "sha256": "03b981a5060d63fbd793baa8a201cc6e21c864ee4ed8f95e8d1cb05b361e5ec6"
+    },
+    "data/clean/futures_SC.csv": {
+      "path": "data/clean/futures_SC.csv",
+      "source": "Sina main continuous futures SC0 (SC); interface=akshare.futures_main_sina",
+      "interface": "akshare.futures_main_sina",
+      "retrieval_time": "2026-11-05T12:16:24+08:00",
+      "schema": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "oi"
+      ],
+      "rows": 2088,
+      "sha256": "738f5cdbc462b7a2da93c7eeb9a23001deafd8903c058565187aa91997bde7f8"
     }
   },
   "interfaces": [
@@ -304,5 +372,64 @@
       "passed": true,
       "detail": "minimum expiries across sample dates=5"
     }
-  ]
+  ],
+  "futures_assertions": [
+    {
+      "dataset": "IF",
+      "rows": 2376,
+      "start": "2017-01-17",
+      "end": "2026-11-04",
+      "span_days": 3578,
+      "years": 9.796030116358658,
+      "duplicate_dates": 0,
+      "nonpositive_prices": 0,
+      "missing_prices": 0,
+      "at_least_5_years": true,
+      "no_duplicate_dates": true,
+      "positive_prices": true
+    },
+    {
+      "dataset": "RB",
+      "rows": 4274,
+      "start": "2009-03-27",
+      "end": "2026-11-04",
+      "span_days": 6431,
+      "years": 17.607118412046542,
+      "duplicate_dates": 0,
+      "nonpositive_prices": 0,
+      "missing_prices": 0,
+      "at_least_5_years": true,
+      "no_duplicate_dates": true,
+      "positive_prices": true
+    },
+    {
+      "dataset": "CU",
+      "rows": 5310,
+      "start": "2005-01-04",
+      "end": "2026-11-04",
+      "span_days": 7974,
+      "years": 21.831622176591377,
+      "duplicate_dates": 0,
+      "nonpositive_prices": 0,
+      "missing_prices": 0,
+      "at_least_5_years": true,
+      "no_duplicate_dates": true,
+      "positive_prices": true
+    },
+    {
+      "dataset": "SC",
+      "rows": 2088,
+      "start": "2018-03-26",
+      "end": "2026-11-04",
+      "span_days": 3145,
+      "years": 8.61054072553046,
+      "duplicate_dates": 0,
+      "nonpositive_prices": 0,
+      "missing_prices": 0,
+      "at_least_5_years": true,
+      "no_duplicate_dates": true,
+      "positive_prices": true
+    }
+  ],
+  "updated_at": "2026-11-05T12:16:24+08:00"
 }
