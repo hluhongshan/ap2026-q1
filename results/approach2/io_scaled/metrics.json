@@ -94,7 +94,88 @@
       },
       "torch_threads": 1
     },
-    "seed_derivation": "sha256(base_seed|date|design|rep) mod (2^31-1); independent of lambda, explicit per fit; all lambda pairs on a date share one initialization"
+    "seed_derivation": "sha256(base_seed|date|design|rep) mod (2^31-1); independent of lambda, explicit per fit; all lambda pairs on a date share one initialization",
+    "svi_solver_cold_start": {
+      "script": "code/approach2_svi_cold_start.py",
+      "seed": 42,
+      "fits": 30,
+      "sample_dates": [
+        "2024-03-14",
+        "2024-09-13",
+        "2025-03-14",
+        "2025-09-15",
+        "2026-03-16",
+        "2026-09-15"
+      ],
+      "otm": {
+        "quotes": 470,
+        "date_expiry_fits": 30,
+        "selection": "same OTM quotes and sample-date expiry fits as approach2 Q1B"
+      },
+      "price_col": "settle",
+      "start": "a = 0.5 * min(w), b = 0.1, rho = -0.3, m = 0, eta = 0.1, clipped to bounds",
+      "bounds": {
+        "lower": [
+          -2.0,
+          0.0,
+          -0.999,
+          -2.0,
+          0.01
+        ],
+        "upper": [
+          2.0,
+          5.0,
+          0.999,
+          2.0,
+          1.0
+        ],
+        "eta_min": 0.01,
+        "eta_max": 1.0
+      },
+      "objective": "mean squared error in total variance w, float64",
+      "torch_objective_scaling": {
+        "constant": "c = 1 / MSE(cold start), recomputed per fit from the quotes alone",
+        "applies_to": "torch Adam and torch L-BFGS objective",
+        "final_objectives": "unscaled MSE",
+        "minimizer_unchanged": true
+      },
+      "solvers": {
+        "adam": {
+          "max_iterations": 5000,
+          "learning_rate": 0.03,
+          "schedule": "cosine annealing to learning_rate * 1e-3",
+          "dtype": "float64"
+        },
+        "lbfgs": {
+          "max_iterations": 500,
+          "line_search": "strong_wolfe",
+          "history_size": 50,
+          "max_eval": 1000,
+          "dtype": "float64"
+        },
+        "scipy": {
+          "method": "trf",
+          "jacobian": "analytic",
+          "max_nfev": 4000,
+          "ftol": 1e-12,
+          "xtol": 1e-12,
+          "gtol": 1e-12
+        }
+      },
+      "tolerance": {
+        "relative": 0.001,
+        "rule": "final objective <= (1 + relative) * best_known + 1e-15",
+        "best_known": "minimum of the three cold-start runs and approach1's multi-start raw fit for that fit"
+      },
+      "timing": "wall seconds measured only inside each solver loop; data loading, summaries and figures are excluded",
+      "summary_censoring": "non-reaching fits are kept: iterations, function evaluations and time to tolerance are censored at that solver's total budget, so medians and p95 use all fits",
+      "cold_start_objective_bounds": {
+        "objective_min": 6.021454371488151e-06,
+        "objective_max": 0.00016451474139494914,
+        "torch_scale_min": 6078.482642261095,
+        "torch_scale_max": 166072.83526284926
+      }
+    }
   },
   "metrics": {
     "quotes_total": 30068,
@@ -3205,6 +3286,141 @@
       },
       "gap_median": 0.0004639128956921562,
       "gap_p95_abs": 0.041160799022721906
+    },
+    "svi_solver_cold_start": {
+      "fits": 30,
+      "tolerance_relative": 0.001,
+      "tolerance_rule": "final objective <= (1 + compare_tol_relative) * best_known + 1e-15",
+      "best_known_rule": "minimum of the three cold-start runs and approach1's multi-start raw fit",
+      "torch_objective_scaling": "c = 1 / MSE(cold start), per fit; final objectives and tolerance use unscaled MSE",
+      "solvers": {
+        "adam": {
+          "reached": 0,
+          "not_reached": 30,
+          "final_objective": {
+            "median": 1.8381098716523033e-08,
+            "p95": 7.536061936249149e-08
+          },
+          "relative_gap_to_best": {
+            "median": 0.5271386823853188,
+            "p95": 6.460788183186803
+          },
+          "iterations_to_tolerance": {
+            "median": 5000.0,
+            "p95": 5000.0,
+            "censored": true,
+            "non_reaching_censored_at": "total_iterations"
+          },
+          "function_evals_to_tolerance": {
+            "median": 5001.0,
+            "p95": 5001.0,
+            "censored": true,
+            "non_reaching_censored_at": "total_function_evals"
+          },
+          "wall_seconds_to_tolerance": {
+            "median": 0.6051249784941319,
+            "p95": 0.614246243602247,
+            "censored": true,
+            "non_reaching_censored_at": "wall_seconds_total"
+          },
+          "total_iterations": {
+            "median": 5000.0,
+            "p95": 5000.0
+          },
+          "total_function_evals": {
+            "median": 5001.0,
+            "p95": 5001.0
+          },
+          "wall_seconds_total": {
+            "median": 0.6051249784941319,
+            "p95": 0.614246243602247
+          }
+        },
+        "lbfgs": {
+          "reached": 14,
+          "not_reached": 16,
+          "final_objective": {
+            "median": 8.00302784144145e-09,
+            "p95": 7.46392169829331e-08
+          },
+          "relative_gap_to_best": {
+            "median": 0.006494236715103655,
+            "p95": 0.7458939865169378
+          },
+          "iterations_to_tolerance": {
+            "median": 500.0,
+            "p95": 500.0,
+            "censored": true,
+            "non_reaching_censored_at": "total_iterations"
+          },
+          "function_evals_to_tolerance": {
+            "median": 644.5,
+            "p95": 750.65,
+            "censored": true,
+            "non_reaching_censored_at": "total_function_evals"
+          },
+          "wall_seconds_to_tolerance": {
+            "median": 0.18309412499365862,
+            "p95": 0.21994554375705774,
+            "censored": true,
+            "non_reaching_censored_at": "wall_seconds_total"
+          },
+          "total_iterations": {
+            "median": 500.0,
+            "p95": 500.0
+          },
+          "total_function_evals": {
+            "median": 671.5,
+            "p95": 794.2999999999998
+          },
+          "wall_seconds_total": {
+            "median": 0.20498841699736658,
+            "p95": 0.22745101250038713
+          }
+        },
+        "scipy": {
+          "reached": 30,
+          "not_reached": 0,
+          "final_objective": {
+            "median": 6.560122294162898e-09,
+            "p95": 7.463360205900742e-08
+          },
+          "relative_gap_to_best": {
+            "median": 1.2659968898233386e-14,
+            "p95": 4.562752820033528e-05
+          },
+          "iterations_to_tolerance": {
+            "median": 46.0,
+            "p95": 1846.85,
+            "censored": true,
+            "non_reaching_censored_at": "total_iterations"
+          },
+          "function_evals_to_tolerance": {
+            "median": 55.5,
+            "p95": 2510.8499999999995,
+            "censored": true,
+            "non_reaching_censored_at": "total_function_evals"
+          },
+          "wall_seconds_to_tolerance": {
+            "median": 0.005072562489658594,
+            "p95": 0.20893727935763307,
+            "censored": true,
+            "non_reaching_censored_at": "wall_seconds_total"
+          },
+          "total_iterations": {
+            "median": 68.0,
+            "p95": 3092.3999999999996
+          },
+          "total_function_evals": {
+            "median": 80.0,
+            "p95": 4000.0
+          },
+          "wall_seconds_total": {
+            "median": 0.0071054159925552085,
+            "p95": 0.34145519839948973
+          }
+        }
+      }
     }
   },
   "fit_seconds": 1635.5163762100274,
