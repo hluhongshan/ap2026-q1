@@ -27,6 +27,8 @@ credentials*
 # Raw data (committed snapshots go to data/clean/)
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/cffex/
+!data/raw/cffex/*.csv
 
 # OS / editor
 .DS_Store
