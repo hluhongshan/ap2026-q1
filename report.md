@@ -727,7 +727,7 @@ The report step itself wrote only `report.md` and a verification script under `.
 
 ## 14. Statement of work
 
-This is an individual submission by Hao Lu. The instructor approved individual completion with AI assistance. opencode with DeepSeek V4.1 Flash wrote the code, ran the experiments and drafted this report. Claude, in a separate chat that is not part of SESSION.md, drafted most of the prompts, proposed many methodology decisions and corrections, and reviewed outputs. Hao Lu directed the work, approved each step, and owns the final submission after reviewing it. The author does not claim to have independently derived the mathematics; the derivations above are a record of the implemented methods and their sources. TODO: author confirms review.
+This is an individual submission by Hao Lu. The instructor approved individual completion with AI assistance. opencode with DeepSeek V4.1 Flash wrote the code, ran the experiments and drafted this report. Claude, in a separate chat that is not part of SESSION.md, drafted most of the prompts, proposed many methodology decisions and corrections, and reviewed outputs. Hao Lu directed the work, approved each step, and owns the final submission after reviewing it. The author does not claim to have independently derived the mathematics; the derivations above are a record of the implemented methods and their sources. The author has read this report.
 
 ## 15. Causal claims
 
