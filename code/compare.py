@@ -75,6 +75,7 @@ def q1_rows(payloads: list[dict]) -> tuple[list[dict], dict[str, str]]:
                 {
                     "source": item["rel"],
                     "dataset": item["dataset"],
+                    "status": "reference",
                     "model": "SVI",
                     "median": repricing["per_fit_median_median"],
                     "p95": repricing["per_fit_max_p95"],
@@ -88,10 +89,20 @@ def q1_rows(payloads: list[dict]) -> tuple[list[dict], dict[str, str]]:
         elif approach == "approach2":
             chosen = metrics["chosen_model"]
             comparison = metrics["comparison_approach1"]
+            if item["dataset"] == "io_scaled":
+                status = "primary"
+                used_label = "Q1B primary: scaled neural vs SVI"
+            elif item["dataset"] == "io":
+                status = "superseded: optimization failure, kept for the record"
+                used_label = "Q1B superseded record"
+            else:
+                status = "secondary"
+                used_label = "Q1 neural vs SVI comparison"
             rows.append(
                 {
                     "source": item["rel"],
                     "dataset": item["dataset"],
+                    "status": status,
                     "model": "neural",
                     "median": chosen["in_sample_repricing"]["median"],
                     "p95": chosen["in_sample_repricing"]["p95"],
@@ -105,6 +116,7 @@ def q1_rows(payloads: list[dict]) -> tuple[list[dict], dict[str, str]]:
                 {
                     "source": item["rel"],
                     "dataset": item["dataset"],
+                    "status": status,
                     "model": "SVI re-priced",
                     "median": comparison["approach1"]["median"],
                     "p95": comparison["approach1"]["p95"],
@@ -114,7 +126,7 @@ def q1_rows(payloads: list[dict]) -> tuple[list[dict], dict[str, str]]:
                     "fit_seconds": fit_seconds,
                 }
             )
-            used[item["rel"]] = "Q1 neural vs SVI comparison"
+            used[item["rel"]] = used_label
     rows.sort(key=lambda row: float(row["median"]))
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
@@ -364,7 +376,7 @@ def build_html(
 ) -> go.Figure:
     sections = [
         ("Source coverage: every results/approach*/*/metrics.json", coverage),
-        ("Q1: SVI vs neural repricing and violations (ranked by median repricing error)", q1),
+        ("Q1: SVI vs neural repricing and violations (primary Q1B = io_scaled; io superseded)", q1),
         ("Q2A: z-scores and variance reduction (ranked by Asian control-variate ratio)", q2a),
         ("Q2A supplementary study: convergence and bias-variance", q2a_study),
         ("Q2B: CVaR, variance and expected P&L (ranked within P&L definition by net CVaR)", q2b),
@@ -418,6 +430,7 @@ def main() -> int:
             row["rank"],
             row["source"].removeprefix("results/").split("/")[0],
             row["dataset"],
+            row["status"],
             row["model"],
             fmt(row["median"]),
             fmt(row["p95"]),
@@ -430,8 +443,8 @@ def main() -> int:
     ]
     console.print(
         rich_table(
-            "Q1: SVI vs neural repricing and violations (ranked by median repricing error)",
-            ["rank", "source", "dataset", "model", "median", "p95", "butterfly", "calendar", "n", "fit_s"],
+            "Q1: SVI vs neural repricing and violations (primary Q1B = io_scaled; io superseded)",
+            ["rank", "source", "dataset", "status", "model", "median", "p95", "butterfly", "calendar", "n", "fit_s"],
             q1_table,
         )
     )

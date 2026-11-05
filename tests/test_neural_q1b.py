@@ -5,9 +5,12 @@ from __future__ import annotations
 import importlib.util
 import math
 import unittest
+import unittest.mock
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +107,133 @@ class TestNeuralQ1B(unittest.TestCase):
         self.assertLess(fit["objective"], 1e-14)
         for name, true, got in zip(("a", "b", "rho", "m", "eta"), TRUE_PARAMS, fit["params"]):
             self.assertLess(abs(got - true), 1e-5, msg=f"{name}: true={true} got={got}")
+
+    def test_positive_scaling_preserves_quadratic_minimizer(self):
+        target = torch.tensor([1.25, -0.75], dtype=torch.float64)
+
+        def fit(scale: float) -> np.ndarray:
+            x = torch.zeros(2, dtype=torch.float64, requires_grad=True)
+            optimizer = torch.optim.LBFGS(
+                [x],
+                lr=1.0,
+                max_iter=50,
+                tolerance_grad=1e-12,
+                tolerance_change=1e-14,
+                line_search_fn="strong_wolfe",
+            )
+
+            def closure() -> torch.Tensor:
+                optimizer.zero_grad(set_to_none=True)
+                loss = scale * ((x - target) ** 2).sum()
+                loss.backward()
+                return loss
+
+            optimizer.step(closure)
+            return x.detach().numpy().copy()
+
+        np.testing.assert_allclose(fit(1.0), fit(9.0), atol=1e-8)
+
+    def test_neural_loss_scaling_is_a_constant_multiple(self):
+        torch.manual_seed(7)
+        model = Q1B.IVSurface(hidden=4, hidden_layers=1)
+        k = torch.tensor([-0.10, 0.0, 0.10], dtype=torch.float64)
+        T = torch.tensor([0.10, 0.20, 0.50], dtype=torch.float64)
+        unit = torch.tensor([0.01, 0.02, 0.03], dtype=torch.float64)
+        colloc_k = torch.tensor(
+            np.tile(np.linspace(Q1B.COLLOC_K_START, Q1B.COLLOC_K_STOP, 5), 3),
+            dtype=torch.float64,
+        )
+        colloc_T = torch.tensor(
+            np.repeat(np.array([0.10, 0.20, 0.50]), 5),
+            dtype=torch.float64,
+        )
+
+        def evaluate(scale: float):
+            model.zero_grad(set_to_none=True)
+            total, price, butterfly, calendar = Q1B.neural_loss(
+                model, k, T, unit, colloc_k, colloc_T,
+                math.sqrt(0.50), 0.3, 0.2, scale=scale,
+            )
+            total.backward()
+            gradients = [param.grad.detach().clone() for param in model.parameters()]
+            return float(total.detach()), price, butterfly, calendar, gradients
+
+        total_a, price_a, butterfly_a, calendar_a, gradients_a = evaluate(1.0)
+        total_b, price_b, butterfly_b, calendar_b, gradients_b = evaluate(4.0)
+        self.assertAlmostEqual(total_b, 4.0 * total_a, places=12)
+        self.assertAlmostEqual(price_b, price_a, places=15)
+        self.assertAlmostEqual(butterfly_b, butterfly_a, places=15)
+        self.assertAlmostEqual(calendar_b, calendar_a, places=15)
+        for grad_a, grad_b in zip(gradients_a, gradients_b):
+            np.testing.assert_allclose(grad_b.numpy(), 4.0 * grad_a.numpy(), rtol=1e-12, atol=1e-15)
+
+    def test_lambda_pairs_share_one_initialization(self):
+        date = pd.Timestamp("2025-09-15")
+        records = []
+        for expiry, expiry_T in (("2025-10-17", 0.08), ("2025-11-21", 0.18)):
+            for k in (-0.10, 0.10):
+                records.append({
+                    "date": date,
+                    "expiry": pd.Timestamp(expiry),
+                    "date_str": "2025-09-15",
+                    "expiry_str": expiry,
+                    "T": expiry_T,
+                    "k": k,
+                    "cp": "P" if k < 0 else "C",
+                    "price": 10.0,
+                    "unit_price": 0.01,
+                    "F": 4000.0,
+                    "K": 4000.0 * math.exp(k),
+                    "DF": 0.99,
+                })
+        otm = pd.DataFrame(records)
+        captured = []
+
+        def fake_fit(group, fit_args, lambda1, lambda2, seed, design, rep, *rest, **kwargs):
+            captured.append((float(lambda1), float(lambda2), int(seed)))
+            t_scale = math.sqrt(float(group["T"].max()))
+            info = {
+                "t_scale": t_scale,
+                "loss": 0.0,
+                "price_loss": 0.0,
+                "total_loss_unscaled": 0.0,
+                "scale": 1.0,
+                "wall_seconds": 0.0,
+                "max_butterfly_penalty": 0.0,
+                "max_calendar_penalty": 0.0,
+                "max_weighted_butterfly": 0.0,
+                "max_weighted_calendar": 0.0,
+                "expiry_T": sorted(group["T"].unique().astype(float).tolist()),
+            }
+            model = Q1B.IVSurface(hidden=4, hidden_layers=1)
+            return {
+                "status": "ok",
+                "model": model,
+                "info": info,
+                "from_cache": False,
+                "attempts": 1,
+            }
+
+        class FakeLog:
+            def check_runtime(self, limit, phase):
+                return None
+
+            def write(self, message):
+                return None
+
+        run_args = SimpleNamespace(
+            seed=42,
+            max_runtime_minutes=60.0,
+            fit_timeout_seconds=120.0,
+            fit_retries=0,
+        )
+        with unittest.mock.patch.object(Q1B, "run_neural_fit_cached", fake_fit), \
+                unittest.mock.patch.object(Q1B, "LAMBDA_VALUES", (0.0, 1.0)):
+            Q1B.run_ablation(
+                otm, [date], run_args, ROOT / ".cache" / "test_q1b", [], [], FakeLog(),
+            )
+        self.assertEqual(len(captured), 4)
+        self.assertEqual(len({item[2] for item in captured}), 1)
 
 
 if __name__ == "__main__":

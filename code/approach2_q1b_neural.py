@@ -55,14 +55,17 @@ DEFAULT_OPTIONS = ROOT / "data" / "clean" / "options_io.csv"
 DEFAULT_SHIBOR = ROOT / "data" / "clean" / "shibor.csv"
 DEFAULT_METADATA = ROOT / "data" / "metadata.json"
 DEFAULT_APPROACH1_DIR = ROOT / "results" / "approach1" / "io"
-DEFAULT_OUT = ROOT / "results" / "approach2" / "io"
-DEFAULT_LOG = ROOT / ".cache" / "approach2_q1b.log"
+DEFAULT_OUT = ROOT / "results" / "approach2" / "io_scaled"
+DEFAULT_LOG = ROOT / ".cache" / "approach2_q1b_scaled.log"
 
 LAMBDA_VALUES = (0.0, 0.01, 1.0)
 COLLOC_K_START = -0.14
 COLLOC_K_STOP = 0.14
+DENSE_K_START = -0.20
+DENSE_K_STOP = 0.20
+DENSE_K_POINTS = 81
 DTYPE = torch.float64
-CACHE_VERSION = "q1b_v1"
+CACHE_VERSION = "q1b_v2_scaled"
 
 
 def load_approach1():
@@ -97,11 +100,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--svi-adam-steps", type=int, default=1200)
     parser.add_argument("--svi-lbfgs-steps", type=int, default=300)
     parser.add_argument("--svi-adam-lr", type=float, default=0.03)
-    parser.add_argument("--nn-adam-steps", type=int, default=1500)
-    parser.add_argument("--nn-lbfgs-steps", type=int, default=100)
-    parser.add_argument("--nn-lbfgs-evals", type=int, default=300)
-    parser.add_argument("--nn-lbfgs-seconds", type=float, default=30.0)
+    parser.add_argument("--nn-adam-steps", type=int, default=3000)
+    parser.add_argument("--nn-lbfgs-steps", type=int, default=1000)
+    parser.add_argument("--nn-lbfgs-evals", type=int, default=1500)
+    parser.add_argument("--nn-lbfgs-seconds", type=float, default=45.0)
     parser.add_argument("--nn-lbfgs-history", type=int, default=20)
+    parser.add_argument("--nn-lbfgs-tolerance-grad", type=float, default=1e-8)
+    parser.add_argument("--nn-lbfgs-tolerance-change", type=float, default=1e-12)
     parser.add_argument("--nn-adam-lr", type=float, default=0.01)
     parser.add_argument("--fit-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--fit-retries", type=int, default=1)
@@ -114,7 +119,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--drop-fraction", type=float, default=0.30)
     parser.add_argument("--wing-fraction", type=float, default=0.15)
     parser.add_argument("--compare-tol-relative", type=float, default=1e-3)
-    parser.add_argument("--max-runtime-minutes", type=float, default=45.0)
+    parser.add_argument("--max-runtime-minutes", type=float, default=60.0)
 
     parser.add_argument("--options", type=Path, default=DEFAULT_OPTIONS)
     parser.add_argument("--shibor", type=Path, default=DEFAULT_SHIBOR)
@@ -271,6 +276,8 @@ FIT_ARG_KEYS = (
     "nn_lbfgs_evals",
     "nn_lbfgs_seconds",
     "nn_lbfgs_history",
+    "nn_lbfgs_tolerance_grad",
+    "nn_lbfgs_tolerance_change",
     "nn_adam_lr",
     "nn_hidden",
     "nn_hidden_layers",
@@ -279,8 +286,8 @@ FIT_ARG_KEYS = (
 )
 
 
-def derive_seed(base_seed: int, date: str, lambda1: float, lambda2: float, design: str, rep) -> int:
-    text = f"{int(base_seed)}|{date}|{float(lambda1):.12g}|{float(lambda2):.12g}|{design}|{rep}"
+def derive_seed(base_seed: int, date: str, design: str, rep) -> int:
+    text = f"{int(base_seed)}|{date}|{design}|{rep}"
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "little") % (2**31 - 1)
 
@@ -731,6 +738,7 @@ def neural_loss(
     t_scale: float,
     lambda1: float,
     lambda2: float,
+    scale: float = 1.0,
 ) -> tuple[torch.Tensor, float, float, float]:
     sigma = model(k_quotes, T_quotes, t_scale)
     unit_model = black_otm_unit(k_quotes, T_quotes, sigma)
@@ -753,7 +761,7 @@ def neural_loss(
             reg_butterfly = torch.mean(torch.relu(-g) ** 2)
         if need_calendar:
             reg_calendar = torch.mean(torch.relu(-w_T) ** 2)
-    total = price_loss + lambda1 * reg_butterfly + lambda2 * reg_calendar
+    total = scale * (price_loss + lambda1 * reg_butterfly + lambda2 * reg_calendar)
     return total, float(price_loss.detach()), float(reg_butterfly.detach()), float(reg_calendar.detach())
 
 
@@ -790,7 +798,8 @@ def lbfgs_bounded(
     max_evals: int,
     max_seconds: float,
     history_size: int,
-    tolerance_grad: float = 1e-10,
+    tolerance_grad: float = 1e-8,
+    tolerance_change: float | None = 1e-12,
 ) -> dict:
     """L-BFGS with two-loop recursion, Armijo backtracking and hard caps."""
     params = list(model.parameters())
@@ -892,22 +901,31 @@ def lbfgs_bounded(
                 s_history.pop(0)
                 y_history.pop(0)
                 rho_history.pop(0)
+        change = abs(new_loss - loss_value)
         loss_value = new_loss
         gradient = new_gradient
         iterations += 1
+        if tolerance_change is not None and change <= tolerance_change * max(1.0, abs(loss_value)):
+            stop_reason = "change_tolerance"
+            break
 
     if evaluations >= max_evals:
         stop_reason = "max_evals"
     if time.perf_counter() - start > max_seconds:
         stop_reason = "max_seconds"
     model.load_state_dict(best_state)
+    final_loss, final_gradient = _loss_and_gradient(model, loss_function)
     return {
-        "loss": best_loss,
+        "loss": final_loss,
         "history": history,
         "iterations": iterations,
         "evaluations": evaluations,
         "seconds": time.perf_counter() - start,
         "stop_reason": stop_reason,
+        "final_grad_norm_l2": float(torch.linalg.vector_norm(final_gradient)),
+        "final_grad_maxabs": float(final_gradient.abs().max()),
+        "tolerance_grad": float(tolerance_grad),
+        "tolerance_change": None if tolerance_change is None else float(tolerance_change),
     }
 
 
@@ -937,10 +955,31 @@ def fit_neural_surface(
         model, k_quotes, T_quotes, unit_market, colloc_k, colloc_T,
         t_scale, lambda1, lambda2,
     )
-    initial_loss = float(initial[0].detach())
-    history: list[float] = [initial_loss]
-    price_history: list[float] = [initial[1]]
-    best_loss = initial_loss
+    initial_total = float(initial[0].detach())
+    initial_price = float(initial[1])
+    if not math.isfinite(initial_price) or initial_price <= 0.0:
+        raise ValueError(f"initial price loss must be positive, got {initial_price!r}")
+    scale = 1.0 / initial_price
+    penalty_max = {
+        "butterfly": float(initial[2]),
+        "calendar": float(initial[3]),
+        "weighted_butterfly": lambda1 * float(initial[2]),
+        "weighted_calendar": lambda2 * float(initial[3]),
+    }
+
+    def observe_penalties(butterfly: float, calendar: float) -> None:
+        penalty_max["butterfly"] = max(penalty_max["butterfly"], float(butterfly))
+        penalty_max["calendar"] = max(penalty_max["calendar"], float(calendar))
+        penalty_max["weighted_butterfly"] = max(
+            penalty_max["weighted_butterfly"], lambda1 * float(butterfly)
+        )
+        penalty_max["weighted_calendar"] = max(
+            penalty_max["weighted_calendar"], lambda2 * float(calendar)
+        )
+
+    history: list[float] = [scale * initial_total]
+    price_history: list[float] = [initial_price]
+    best_loss = scale * initial_total
     best_state = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()}
     start = time.perf_counter()
 
@@ -950,31 +989,40 @@ def fit_neural_surface(
     )
     for _ in range(args.nn_adam_steps):
         optimizer.zero_grad(set_to_none=True)
-        total, price_loss, _, _ = neural_loss(
+        total, price_loss, butterfly, calendar = neural_loss(
             model, k_quotes, T_quotes, unit_market, colloc_k, colloc_T,
-            t_scale, lambda1, lambda2,
+            t_scale, lambda1, lambda2, scale=scale,
         )
         total.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 100.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 100.0 * scale)
         optimizer.step()
         scheduler.step()
         value = float(total.detach())
         history.append(value)
         price_history.append(price_loss)
+        observe_penalties(butterfly, calendar)
         if value < best_loss:
             best_loss = value
             best_state = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()}
         if value < 1e-18:
             break
     adam_evals = len(history)
-    if best_state is not None:
-        model.load_state_dict(best_state)
+    model.load_state_dict(best_state)
+    adam_end_total, adam_end_price, adam_end_butterfly, adam_end_calendar = neural_loss(
+        model, k_quotes, T_quotes, unit_market, colloc_k, colloc_T,
+        t_scale, lambda1, lambda2, scale=scale,
+    )
+    adam_end_total = float(adam_end_total.detach())
+    adam_end_price = float(adam_end_price)
+    observe_penalties(adam_end_butterfly, adam_end_calendar)
 
     def loss_function() -> torch.Tensor:
-        return neural_loss(
+        total, _, butterfly, calendar = neural_loss(
             model, k_quotes, T_quotes, unit_market, colloc_k, colloc_T,
-            t_scale, lambda1, lambda2,
-        )[0]
+            t_scale, lambda1, lambda2, scale=scale,
+        )
+        observe_penalties(butterfly, calendar)
+        return total
 
     lbfgs_result = lbfgs_bounded(
         model,
@@ -983,22 +1031,45 @@ def fit_neural_surface(
         max_evals=args.nn_lbfgs_evals,
         max_seconds=args.nn_lbfgs_seconds,
         history_size=args.nn_lbfgs_history,
+        tolerance_grad=args.nn_lbfgs_tolerance_grad,
+        tolerance_change=args.nn_lbfgs_tolerance_change,
     )
     history.extend(lbfgs_result["history"])
-    final_loss = float(neural_loss(
+    final_total, final_price, final_butterfly, final_calendar = neural_loss(
         model, k_quotes, T_quotes, unit_market, colloc_k, colloc_T,
-        t_scale, lambda1, lambda2,
-    )[0].detach())
+        t_scale, lambda1, lambda2, scale=scale,
+    )
+    final_total = float(final_total.detach())
+    final_price = float(final_price)
+    observe_penalties(final_butterfly, final_calendar)
     model.eval()
     wall = time.perf_counter() - start
     info = {
         "t_scale": t_scale,
-        "loss": final_loss,
+        "loss": final_total,
+        "price_loss": final_price,
+        "total_loss_unscaled": final_total / scale,
+        "scale": scale,
+        "initial_price_loss": initial_price,
+        "adam_end_total": adam_end_total,
+        "adam_end_price": adam_end_price,
+        "lbfgs_end_total": final_total,
+        "lbfgs_end_price": final_price,
         "adam_evals": int(adam_evals),
         "lbfgs_evals": int(lbfgs_result["evaluations"]),
         "lbfgs_iterations": int(lbfgs_result["iterations"]),
         "lbfgs_stop_reason": lbfgs_result["stop_reason"],
         "lbfgs_seconds": float(lbfgs_result["seconds"]),
+        "lbfgs_final_grad_norm_l2": float(lbfgs_result["final_grad_norm_l2"]),
+        "lbfgs_final_grad_maxabs": float(lbfgs_result["final_grad_maxabs"]),
+        "lbfgs_tolerance_grad": float(lbfgs_result["tolerance_grad"]),
+        "lbfgs_tolerance_change": (
+            None if lbfgs_result["tolerance_change"] is None else float(lbfgs_result["tolerance_change"])
+        ),
+        "max_butterfly_penalty": penalty_max["butterfly"],
+        "max_calendar_penalty": penalty_max["calendar"],
+        "max_weighted_butterfly": penalty_max["weighted_butterfly"],
+        "max_weighted_calendar": penalty_max["weighted_calendar"],
         "iterations": int(adam_evals - 1 + lbfgs_result["evaluations"]),
         "wall_seconds": float(wall),
         "history": history,
@@ -1012,11 +1083,27 @@ def fit_neural_surface(
 CACHE_INFO_KEYS = (
     "t_scale",
     "loss",
+    "price_loss",
+    "total_loss_unscaled",
+    "scale",
+    "initial_price_loss",
+    "adam_end_total",
+    "adam_end_price",
+    "lbfgs_end_total",
+    "lbfgs_end_price",
     "adam_evals",
     "lbfgs_evals",
     "lbfgs_iterations",
     "lbfgs_stop_reason",
     "lbfgs_seconds",
+    "lbfgs_final_grad_norm_l2",
+    "lbfgs_final_grad_maxabs",
+    "lbfgs_tolerance_grad",
+    "lbfgs_tolerance_change",
+    "max_butterfly_penalty",
+    "max_calendar_penalty",
+    "max_weighted_butterfly",
+    "max_weighted_calendar",
     "iterations",
     "wall_seconds",
     "colloc_points",
@@ -1261,16 +1348,23 @@ def svi_repricing_errors(params: np.ndarray, group: pd.DataFrame) -> np.ndarray:
     return np.abs(model_prices[valid] - market[valid]) / market[valid]
 
 
-def neural_audit(model: IVSurface, expiry_T: np.ndarray, t_scale: float, tol: float = BUTTERFLY_TOL) -> dict:
-    Ts = np.sort(np.asarray(expiry_T, dtype=float))
-    n_k = len(GRID_K)
-    k = torch.tensor(np.tile(GRID_K, len(Ts)), dtype=DTYPE)
+def neural_audit_grid(
+    model: IVSurface,
+    T_grid: np.ndarray,
+    k_grid: np.ndarray,
+    t_scale: float,
+    tol: float = BUTTERFLY_TOL,
+) -> dict:
+    Ts = np.sort(np.asarray(T_grid, dtype=float))
+    k_grid = np.asarray(k_grid, dtype=float)
+    n_k = len(k_grid)
+    k = torch.tensor(np.tile(k_grid, len(Ts)), dtype=DTYPE)
     T = torch.tensor(np.repeat(Ts, n_k), dtype=DTYPE)
     w_tensor, w_k, w_kk, _ = neural_w_derivatives(model, k, T, t_scale, need_k=True, need_T=False)
     w = w_tensor.detach().numpy().reshape(len(Ts), n_k)
     w1 = w_k.detach().numpy().reshape(len(Ts), n_k)
     w2 = w_kk.detach().numpy().reshape(len(Ts), n_k)
-    k_np = GRID_K.reshape(1, n_k)
+    k_np = k_grid.reshape(1, n_k)
     g = (1.0 - k_np * w1 / (2.0 * w)) ** 2 - (w1 * w1 / 4.0) * (1.0 / w + 1.0 / 4.0) + w2 / 2.0
     diff = w[1:] - w[:-1]
     return {
@@ -1283,6 +1377,23 @@ def neural_audit(model: IVSurface, expiry_T: np.ndarray, t_scale: float, tol: fl
         "checks_butterfly": int(g.size),
         "checks_calendar": int(diff.size),
     }
+
+
+def neural_audit(model: IVSurface, expiry_T: np.ndarray, t_scale: float, tol: float = BUTTERFLY_TOL) -> dict:
+    return neural_audit_grid(model, np.sort(np.asarray(expiry_T, dtype=float)), GRID_K, t_scale, tol)
+
+
+def neural_dense_audit(
+    model: IVSurface,
+    expiry_T: np.ndarray,
+    t_scale: float,
+    tol: float = BUTTERFLY_TOL,
+) -> dict:
+    Ts = np.sort(np.asarray(expiry_T, dtype=float))
+    midpoints = 0.5 * (Ts[:-1] + Ts[1:])
+    T_grid = np.sort(np.unique(np.concatenate([Ts, midpoints])))
+    k_grid = np.linspace(DENSE_K_START, DENSE_K_STOP, DENSE_K_POINTS)
+    return neural_audit_grid(model, T_grid, k_grid, t_scale, tol)
 
 
 def pooled_stats(errors: np.ndarray) -> dict:
@@ -1317,9 +1428,9 @@ def run_ablation(
         group = date_quotes(otm, date)
         date_str = pd.Timestamp(date).strftime("%Y-%m-%d")
         expiry_T = np.sort(group["T"].unique().astype(float))
+        seed = derive_seed(args.seed, date_str, "ablation", 0)
         for lambda1 in LAMBDA_VALUES:
             for lambda2 in LAMBDA_VALUES:
-                seed = derive_seed(args.seed, date_str, lambda1, lambda2, "ablation", 0)
                 fit_result = run_neural_fit_cached(
                     group, args, lambda1, lambda2, seed, "ablation", 0,
                     cache_dir, args.fit_timeout_seconds, args.fit_retries,
@@ -1335,6 +1446,7 @@ def run_ablation(
                 info = fit_result["info"]
                 rel, _ = neural_repricing_errors(model, group, info["t_scale"])
                 audit = neural_audit(model, expiry_T, info["t_scale"])
+                dense = neural_dense_audit(model, expiry_T, info["t_scale"])
                 models[(date_str, lambda1, lambda2)] = {
                     "model": model,
                     "t_scale": info["t_scale"],
@@ -1353,14 +1465,23 @@ def run_ablation(
                     "median_rel_error": float(np.median(rel)),
                     "max_rel_error": float(np.max(rel)),
                     "p95_rel_error": float(np.quantile(rel, 0.95)),
-                    "fit_loss": float(info["loss"]),
+                    "fit_loss": float(info["price_loss"]),
+                    "total_loss_unscaled": float(info["total_loss_unscaled"]),
+                    "scaled_loss": float(info["loss"]),
+                    "scale": float(info["scale"]),
+                    "max_butterfly_penalty": float(info["max_butterfly_penalty"]),
+                    "max_calendar_penalty": float(info["max_calendar_penalty"]),
+                    "max_weighted_butterfly": float(info["max_weighted_butterfly"]),
+                    "max_weighted_calendar": float(info["max_weighted_calendar"]),
                     "fit_seconds": float(info["wall_seconds"]),
                     **{key: value for key, value in audit.items() if key.startswith(("butterfly", "calendar", "min_"))},
+                    **{f"dense_{key}": value for key, value in dense.items() if key.startswith(("butterfly", "calendar", "min_"))},
                 })
                 log.write(
                     f"nn {date_str} l1={lambda1} l2={lambda2} seed={seed} "
                     f"median={np.median(rel):.4f} max={np.max(rel):.4f} "
-                    f"bf={audit['butterfly_violations']} cal={audit['calendar_violations']}"
+                    f"bf={audit['butterfly_violations']} cal={audit['calendar_violations']} "
+                    f"penalty_max=({info['max_butterfly_penalty']:.3e},{info['max_calendar_penalty']:.3e})"
                 )
     frame = pd.DataFrame(rows)
     aggregate = []
@@ -1372,6 +1493,7 @@ def run_ablation(
             aggregate.append({
                 "lambda1": lambda1,
                 "lambda2": lambda2,
+                "lambda_sum": float(lambda1 + lambda2),
                 "n_fits_requested": int(len(sample_dates)),
                 "n_fits_succeeded": n_succeeded,
                 "n_fits_failed": int(len(sample_dates) - n_succeeded),
@@ -1387,6 +1509,19 @@ def run_ablation(
                 "calendar_violations": int(subset.calendar_violations.sum()) if n_succeeded else 0,
                 "min_g": float(subset.min_g.min()) if n_succeeded else float("nan"),
                 "min_forward_variance": float(subset.min_forward_variance.min()) if n_succeeded else float("nan"),
+                "dense_butterfly_violations_strict": int(subset.dense_butterfly_violations_strict.sum()) if n_succeeded else 0,
+                "dense_butterfly_violations": int(subset.dense_butterfly_violations.sum()) if n_succeeded else 0,
+                "dense_calendar_violations_strict": int(subset.dense_calendar_violations_strict.sum()) if n_succeeded else 0,
+                "dense_calendar_violations": int(subset.dense_calendar_violations.sum()) if n_succeeded else 0,
+                "dense_min_g": float(subset.dense_min_g.min()) if n_succeeded else float("nan"),
+                "dense_min_forward_variance": float(subset.dense_min_forward_variance.min()) if n_succeeded else float("nan"),
+                "max_butterfly_penalty": float(subset.max_butterfly_penalty.max()) if n_succeeded else 0.0,
+                "max_calendar_penalty": float(subset.max_calendar_penalty.max()) if n_succeeded else 0.0,
+                "max_weighted_butterfly": float(subset.max_weighted_butterfly.max()) if n_succeeded else 0.0,
+                "max_weighted_calendar": float(subset.max_weighted_calendar.max()) if n_succeeded else 0.0,
+                "fit_loss_median": float(subset.fit_loss.median()) if n_succeeded else float("nan"),
+                "scaled_loss_median": float(subset.scaled_loss.median()) if n_succeeded else float("nan"),
+                "scale_median": float(subset.scale.median()) if n_succeeded else float("nan"),
                 "fit_seconds_total": float(subset.fit_seconds.sum()) if n_succeeded else 0.0,
                 "fit_seconds_median": float(subset.fit_seconds.median()) if n_succeeded else float("nan"),
             })
@@ -1401,12 +1536,12 @@ def run_ablation(
     ]
     if len(complete):
         ordered = complete.sort_values(
-            ["median_rel_error", "max_rel_error", "lambda1", "lambda2"]
+            ["median_rel_error", "lambda_sum", "lambda1", "lambda2"]
         )
     else:
         ordered = aggregate_frame.sort_values(
             ["n_fits_failed", "butterfly_violations", "calendar_violations",
-             "median_rel_error", "max_rel_error"]
+             "median_rel_error", "lambda_sum", "lambda1", "lambda2"]
         )
     chosen_row = ordered.iloc[0].to_dict()
     chosen = (float(chosen_row["lambda1"]), float(chosen_row["lambda2"]))
@@ -1415,11 +1550,11 @@ def run_ablation(
     ].iloc[0].to_dict()
     selection = {
         "rule": (
-            "Choose the lambda pair with complete fit coverage, zero butterfly and calendar "
-            "violations at 1e-8 on the approach1 audit grid (strict counts included), and the "
-            "smallest pooled in-sample OTM relative repricing median; break ties by pooled max "
-            "error, then by (lambda1, lambda2). If no pair has complete coverage and zero "
-            "violations, minimize failed fits, then total violations, then repricing error. "
+            "Choose the lambda pair with complete fit coverage, then zero butterfly and calendar "
+            "violations at 1e-8 on the approach1 audit grid (strict counts included), then the "
+            "smallest pooled in-sample OTM relative repricing median; break ties by the smallest "
+            "lambda1 + lambda2, then by (lambda1, lambda2). If no pair has complete coverage and "
+            "zero violations, minimize failed fits, then total violations, then repricing error. "
             "Only in-sample ablation data are used; robustness holdouts are never used for selection."
         ),
         "chosen_lambda1": chosen[0],
@@ -1501,7 +1636,7 @@ def run_robustness(
         date_str = pd.Timestamp(date).strftime("%Y-%m-%d")
         designs: list[tuple[str, int, pd.DataFrame, pd.DataFrame]] = []
         for seed_offset in range(args.robust_seeds):
-            split_seed = derive_seed(args.seed, date_str, 0.0, 0.0, "split_random", seed_offset)
+            split_seed = derive_seed(args.seed, date_str, "split_random", seed_offset)
             rng = np.random.default_rng(split_seed)
             indices = np.arange(len(group))
             rng.shuffle(indices)
@@ -1548,7 +1683,7 @@ def run_robustness(
             svi_rel = np.asarray(svi_errors, dtype=float)
             succeeded_svi += 1
             seed_key = f"{design}:{rep}"
-            seed = derive_seed(args.seed, date_str, lambda1, lambda2, design, rep)
+            seed = derive_seed(args.seed, date_str, design, rep)
             requested_neural += 1
             fit_result = run_neural_fit_cached(
                 train, args, lambda1, lambda2, seed, design, rep,
@@ -1567,6 +1702,7 @@ def run_robustness(
                 failed_neural += 1
             pooled.setdefault((design, "svi"), []).extend(svi_rel.tolist())
             per_seed.setdefault((design, seed_key, "svi"), []).extend(svi_rel.tolist())
+            neural_info = fit_result.get("info", {}) if fit_result["status"] == "ok" else {}
             for model_name, values, status in (
                 ("svi", svi_rel, "ok"),
                 ("neural", neural_rel, "ok" if neural_rel is not None else "failed"),
@@ -1592,7 +1728,9 @@ def run_robustness(
                     "n_train": int(len(train)),
                     "n_held": int(len(held)),
                     "skipped_expiries": ";".join(skipped),
-                    "fit_seconds": float(fit_result["info"]["wall_seconds"]) if model_name == "neural" and status == "ok" else float("nan"),
+                    "max_butterfly_penalty": float(neural_info.get("max_butterfly_penalty", float("nan"))) if model_name == "neural" and status == "ok" else float("nan"),
+                    "max_calendar_penalty": float(neural_info.get("max_calendar_penalty", float("nan"))) if model_name == "neural" and status == "ok" else float("nan"),
+                    "fit_seconds": float(neural_info["wall_seconds"]) if model_name == "neural" and status == "ok" else float("nan"),
                 })
             log.write(
                 f"robust {date_str} {design} rep={rep} fit_seed={seed} "
@@ -1881,7 +2019,7 @@ def run_determinism_check(
     failed_fits: list[dict],
     cache_stats: dict,
 ) -> dict:
-    seed = derive_seed(args.seed, date_str, lambda1, lambda2, "determinism", 0)
+    seed = derive_seed(args.seed, date_str, "determinism", 0)
     results = {}
     for label in ("determinism_a", "determinism_b"):
         results[label] = run_neural_fit_cached(
@@ -1994,8 +2132,23 @@ def make_metrics_payload(
         "neural_loss": (
             "mean((C_BS(sigma)-C_mkt)^2) in undiscounted OTM price per unit forward, plus "
             "lambda1*mean(max(0,-g)^2) + lambda2*mean(max(0,-dw/dT)^2) on a collocation grid "
-            "k in [-0.14,0.14] crossed with T spanning the listed expiries; g includes +w''/2."
+            "k in [-0.14,0.14] crossed with T spanning the listed expiries; g includes +w''/2. "
+            "The whole objective (fit plus penalties) is multiplied by c = 1/initial price loss; "
+            "lambda is unchanged, so the minimizer is mathematically unchanged."
         ),
+        "objective_scaling": {
+            "constant": "c = 1 / initial_price_loss, computed per fit from the shared initialization",
+            "applies_to": "fit term and both penalty terms (whole objective)",
+            "lambda_unchanged": True,
+            "gradient_clip": "100*c",
+            "adam_steps": int(args.nn_adam_steps),
+            "adam_lr": float(args.nn_adam_lr),
+            "lbfgs_steps": int(args.nn_lbfgs_steps),
+            "lbfgs_evals": int(args.nn_lbfgs_evals),
+            "lbfgs_seconds": float(args.nn_lbfgs_seconds),
+            "lbfgs_tolerance_grad": float(args.nn_lbfgs_tolerance_grad),
+            "lbfgs_tolerance_change": float(args.nn_lbfgs_tolerance_change),
+        },
         "lambda_grid": list(LAMBDA_VALUES),
         "selection_rule": selection["rule"],
         "chosen_lambdas": {"lambda1": chosen[0], "lambda2": chosen[1]},
@@ -2017,7 +2170,7 @@ def make_metrics_payload(
             "thread_env": {"OMP_NUM_THREADS": 1, "MKL_NUM_THREADS": 1, "OPENBLAS_NUM_THREADS": 1, "NUMEXPR_NUM_THREADS": 1},
             "torch_threads": 1,
         },
-        "seed_derivation": "sha256(base_seed|date|lambda1|lambda2|design|rep) mod (2^31-1); explicit per fit",
+        "seed_derivation": "sha256(base_seed|date|design|rep) mod (2^31-1); independent of lambda, explicit per fit; all lambda pairs on a date share one initialization",
     }
     metrics = {
         "quotes_total": int(filter_counts["quotes_total"]),
@@ -2056,9 +2209,23 @@ def make_metrics_payload(
                 "calendar_violations": int(sum(item["calendar_violations"] for item in chosen_audits)),
                 "min_g": float(min((item["min_g"] for item in chosen_audits), default=float("nan"))),
                 "min_forward_variance": float(min((item["min_forward_variance"] for item in chosen_audits), default=float("nan"))),
+                "dense_butterfly_violations_strict": int(sum(item.get("dense_butterfly_violations_strict", 0) for item in chosen_audits)),
+                "dense_butterfly_violations": int(sum(item.get("dense_butterfly_violations", 0) for item in chosen_audits)),
+                "dense_calendar_violations_strict": int(sum(item.get("dense_calendar_violations_strict", 0) for item in chosen_audits)),
+                "dense_calendar_violations": int(sum(item.get("dense_calendar_violations", 0) for item in chosen_audits)),
+                "dense_min_g": float(min((item.get("dense_min_g", float("nan")) for item in chosen_audits), default=float("nan"))),
+                "dense_min_forward_variance": float(min((item.get("dense_min_forward_variance", float("nan")) for item in chosen_audits), default=float("nan"))),
+                "max_butterfly_penalty": float(chosen_per_date.max_butterfly_penalty.max()) if len(chosen_per_date) else float("nan"),
+                "max_calendar_penalty": float(chosen_per_date.max_calendar_penalty.max()) if len(chosen_per_date) else float("nan"),
                 "tolerance": {"butterfly": BUTTERFLY_TOL, "calendar_w": CALENDAR_TOL},
                 "grid": {"start": float(GRID_K[0]), "stop": float(GRID_K[-1]), "points": int(len(GRID_K))},
-                "note": "Violations counted on the approach1 k grid at each listed expiry; calendar compares adjacent expiries only.",
+                "dense_grid": {
+                    "k_start": float(DENSE_K_START),
+                    "k_stop": float(DENSE_K_STOP),
+                    "k_points": int(DENSE_K_POINTS),
+                    "T": "listed expiries plus midpoints between adjacent expiries",
+                },
+                "note": "Approach1-grid violations at each listed expiry; dense-grid violations use k in [-0.20,0.20] step 0.005 and listed expiries plus midpoints. Calendar compares adjacent T grid points.",
             },
         },
         "comparison_approach1": comparison,
@@ -2313,7 +2480,12 @@ def run(args: argparse.Namespace) -> dict:
             continue
         item = models[key]
         audit = neural_audit(item["model"], np.asarray(item["info"]["expiry_T"], dtype=float), item["t_scale"])
-        chosen_audits.append({"date": date_str, **audit})
+        dense = neural_dense_audit(item["model"], np.asarray(item["info"]["expiry_T"], dtype=float), item["t_scale"])
+        chosen_audits.append({
+            "date": date_str,
+            **audit,
+            **{f"dense_{key}": value for key, value in dense.items() if key.startswith(("butterfly", "calendar", "min_"))},
+        })
     comparison = compare_with_approach1(otm, models, sample_dates, chosen, args.approach1_dir)
 
     surface = build_surface_frame(models, sample_dates, chosen)
