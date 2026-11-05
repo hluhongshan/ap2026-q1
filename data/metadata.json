@@ -129,6 +129,71 @@
       ],
       "rows": 2088,
       "sha256": "738f5cdbc462b7a2da93c7eeb9a23001deafd8903c058565187aa91997bde7f8"
+    },
+    "data/clean/macro_panel.csv": {
+      "path": "data/clean/macro_panel.csv",
+      "source": "Q3 monthly macro panel from akshare odds and committed SHIBOR",
+      "interface": "see macro_meta.csv",
+      "retrieval_time": "2026-11-05T13:39:36+08:00",
+      "schema": [
+        "date",
+        "pmi",
+        "gdp_yoy",
+        "cgb10y",
+        "spread_10y_2y",
+        "shibor_3m",
+        "pmi_non_man",
+        "cpi_yoy",
+        "ppi_yoy",
+        "m2_yoy",
+        "m1_yoy",
+        "tsf_12m_yoy",
+        "new_credit_yoy",
+        "lpr_1y",
+        "lpr_5y",
+        "retail_yoy",
+        "industrial_production_yoy",
+        "fai_ytd_yoy",
+        "exports_yoy",
+        "imports_yoy",
+        "consumer_confidence",
+        "electricity_yoy",
+        "real_estate_climate",
+        "fx_reserves_yoy",
+        "unemployment",
+        "fiscal_revenue_yoy",
+        "commodity_price_yoy",
+        "stock_mktcap_yoy",
+        "commodity_spot_yoy",
+        "central_bank_assets_yoy",
+        "margin_balance_yoy",
+        "cgb2y",
+        "cgb5y",
+        "cgb30y",
+        "industrial_profit_yoy"
+      ],
+      "rows": 202,
+      "sha256": "fce375315930e2aea2b91a2c93b7fc8e822d053c7a79b3252a28c0409830bc83"
+    },
+    "data/clean/macro_meta.csv": {
+      "path": "data/clean/macro_meta.csv",
+      "source": "Q3 series metadata and conservative availability lags",
+      "interface": "see source_interface column",
+      "retrieval_time": "2026-11-05T13:39:36+08:00",
+      "schema": [
+        "series",
+        "source_interface",
+        "source_column",
+        "transform",
+        "lag",
+        "lag_basis",
+        "first_date",
+        "last_date",
+        "missing_share",
+        "outlier_count"
+      ],
+      "rows": 34,
+      "sha256": "1d29bab65ca3fc42e129e556e17cb103fbe51402975c5c14c3a772548b77d17a"
     }
   },
   "interfaces": [
@@ -431,5 +496,1131 @@
       "positive_prices": true
     }
   ],
-  "updated_at": "2026-11-05T12:16:24+08:00"
+  "updated_at": "2026-11-05T13:39:36+08:00",
+  "q3": {
+    "panel_start": "2010-01-31",
+    "panel_end": "2026-10-31",
+    "months": 202,
+    "d": 34,
+    "required_series": [
+      "pmi",
+      "gdp_yoy",
+      "cgb10y",
+      "spread_10y_2y",
+      "shibor_3m"
+    ],
+    "series": [
+      {
+        "series": "central_bank_assets_yoy",
+        "source_interface": "macro_china_central_bank_balance",
+        "source_column": "总资产",
+        "transform": "total assets level, YoY % vs same month previous year (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: central-bank balance sheet published with a lag (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "cgb10y",
+        "source_interface": "bond_zh_us_rate",
+        "source_column": "中国国债收益率10年",
+        "transform": "monthly mean of daily yield, level in percent",
+        "lag": 0,
+        "lag_basis": "market yield/spread; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 0
+      },
+      {
+        "series": "cgb2y",
+        "source_interface": "bond_zh_us_rate",
+        "source_column": "中国国债收益率2年",
+        "transform": "monthly mean of daily yield, level in percent",
+        "lag": 0,
+        "lag_basis": "market yield/spread; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 0
+      },
+      {
+        "series": "cgb30y",
+        "source_interface": "bond_zh_us_rate",
+        "source_column": "中国国债收益率30年",
+        "transform": "monthly mean of daily yield, level in percent",
+        "lag": 0,
+        "lag_basis": "market yield/spread; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 0
+      },
+      {
+        "series": "cgb5y",
+        "source_interface": "bond_zh_us_rate",
+        "source_column": "中国国债收益率5年",
+        "transform": "monthly mean of daily yield, level in percent",
+        "lag": 0,
+        "lag_basis": "market yield/spread; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 0
+      },
+      {
+        "series": "commodity_price_yoy",
+        "source_interface": "macro_china_qyspjg",
+        "source_column": "总指数-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: corporate commodity price index published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "commodity_spot_yoy",
+        "source_interface": "macro_china_commodity_price_index",
+        "source_column": "最新值",
+        "transform": "monthly mean of daily/weekly index, then YoY % (no seasonal adjustment)",
+        "lag": 0,
+        "lag_basis": "daily market index; monthly mean available at month end (source convention)",
+        "first_date": "2012-12-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.17326732673267325,
+        "outlier_count": 1
+      },
+      {
+        "series": "consumer_confidence",
+        "source_interface": "macro_china_xfzxx",
+        "source_column": "消费者信心指数-指数值",
+        "transform": "level (index; no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: consumer confidence published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "cpi_yoy",
+        "source_interface": "macro_china_cpi",
+        "source_column": "全国-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: CPI published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "electricity_yoy",
+        "source_interface": "macro_china_society_electricity",
+        "source_column": "全社会用电量同比",
+        "transform": "YTD YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: electricity published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.09405940594059406,
+        "outlier_count": 9
+      },
+      {
+        "series": "exports_yoy",
+        "source_interface": "macro_china_hgjck",
+        "source_column": "当月出口额-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: trade published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 1
+      },
+      {
+        "series": "fai_ytd_yoy",
+        "source_interface": "macro_china_gdzctz",
+        "source_column": "自年初累计",
+        "transform": "YTD level, YoY % vs same month previous year (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: fixed investment published in following month (assumption; raw has no release date)",
+        "first_date": "2013-02-28",
+        "last_date": "2026-09-30",
+        "missing_share": 0.2524752475247525,
+        "outlier_count": 0
+      },
+      {
+        "series": "fiscal_revenue_yoy",
+        "source_interface": "macro_china_czsr",
+        "source_column": "当月-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: fiscal revenue published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.08415841584158416,
+        "outlier_count": 4
+      },
+      {
+        "series": "fx_reserves_yoy",
+        "source_interface": "macro_china_fx_gold",
+        "source_column": "国家外汇储备-同比",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: FX reserves published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 8
+      },
+      {
+        "series": "gdp_yoy",
+        "source_interface": "macro_china_gdp",
+        "source_column": "国内生产总值-同比增长",
+        "transform": "quarterly real YoY %, derived by chaining official cumulative growth and differencing YTD real levels (current revised vintage); Jin10 GDP report used only as an external cross-check",
+        "lag": 1,
+        "lag_basis": "brief default: GDP published about mid-month after quarter end (assumption; raw has no release date)",
+        "first_date": "2010-03-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.6683168316831684,
+        "outlier_count": 2
+      },
+      {
+        "series": "imports_yoy",
+        "source_interface": "macro_china_hgjck",
+        "source_column": "当月进口额-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: trade published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "industrial_production_yoy",
+        "source_interface": "macro_china_gyzjz",
+        "source_column": "同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: industrial output published in following month (assumption; raw has no release date)",
+        "first_date": "2010-02-28",
+        "last_date": "2026-09-30",
+        "missing_share": 0.1485148514851485,
+        "outlier_count": 3
+      },
+      {
+        "series": "industrial_profit_yoy",
+        "source_interface": "macro_china_nbs_nation (path=工业 > 工业企业主要经济指标)",
+        "source_column": "利润总额累计增长(%)",
+        "transform": "YTD cumulative YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: industrial profits published in following month (assumption; NBS generic interface has no release date)",
+        "first_date": "2010-02-28",
+        "last_date": "2026-09-30",
+        "missing_share": 0.12376237623762376,
+        "outlier_count": 7
+      },
+      {
+        "series": "lpr_1y",
+        "source_interface": "macro_china_lpr",
+        "source_column": "LPR1Y",
+        "transform": "month-end last published rate, level in percent",
+        "lag": 0,
+        "lag_basis": "LPR is announced on the 20th of the reference month; public by month end (source convention)",
+        "first_date": "2013-10-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.22277227722772278,
+        "outlier_count": 0
+      },
+      {
+        "series": "lpr_5y",
+        "source_interface": "macro_china_lpr",
+        "source_column": "LPR5Y",
+        "transform": "month-end last published rate, level in percent",
+        "lag": 0,
+        "lag_basis": "LPR is announced on the 20th of the reference month; public by month end (source convention)",
+        "first_date": "2019-08-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.5693069306930693,
+        "outlier_count": 0
+      },
+      {
+        "series": "m1_yoy",
+        "source_interface": "macro_china_money_supply",
+        "source_column": "货币(M1)-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: money supply published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 5
+      },
+      {
+        "series": "m2_yoy",
+        "source_interface": "macro_china_money_supply",
+        "source_column": "货币和准货币(M2)-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: money supply published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "margin_balance_yoy",
+        "source_interface": "macro_china_market_margin_sh",
+        "source_column": "融资融券余额",
+        "transform": "monthly mean of daily margin balance, then YoY % (no seasonal adjustment)",
+        "lag": 0,
+        "lag_basis": "daily market data; monthly mean available at month end (source convention)",
+        "first_date": "2011-04-30",
+        "last_date": "2026-10-31",
+        "missing_share": 0.07425742574257425,
+        "outlier_count": 24
+      },
+      {
+        "series": "new_credit_yoy",
+        "source_interface": "macro_china_new_financial_credit",
+        "source_column": "当月-同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: credit published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 3
+      },
+      {
+        "series": "pmi",
+        "source_interface": "macro_china_pmi",
+        "source_column": "制造业-指数",
+        "transform": "level (diffusion index; source seasonally adjusted)",
+        "lag": 0,
+        "lag_basis": "brief default: NBS manufacturing PMI published around month end (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 1
+      },
+      {
+        "series": "pmi_non_man",
+        "source_interface": "macro_china_pmi",
+        "source_column": "非制造业-指数",
+        "transform": "level (diffusion index; source seasonally adjusted)",
+        "lag": 0,
+        "lag_basis": "brief default: NBS non-manufacturing PMI published around month end (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 3
+      },
+      {
+        "series": "ppi_yoy",
+        "source_interface": "macro_china_ppi",
+        "source_column": "当月同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: PPI published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.0049504950495049506,
+        "outlier_count": 0
+      },
+      {
+        "series": "real_estate_climate",
+        "source_interface": "macro_china_real_estate",
+        "source_column": "最新值",
+        "transform": "level (climate index; no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: real-estate climate index published in following month (assumption; raw has no release date)",
+        "first_date": "2010-02-28",
+        "last_date": "2025-12-31",
+        "missing_share": 0.09405940594059406,
+        "outlier_count": 0
+      },
+      {
+        "series": "retail_yoy",
+        "source_interface": "macro_china_consumer_goods_retail",
+        "source_column": "同比增长",
+        "transform": "YoY % as reported (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: retail sales published in following month (assumption; raw has no release date)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.15346534653465346,
+        "outlier_count": 0
+      },
+      {
+        "series": "shibor_3m",
+        "source_interface": "data/clean/shibor.csv (committed snapshot; akshare.macro_china_shibor_all)",
+        "source_column": "3M",
+        "transform": "monthly mean of daily rate, level in percent",
+        "lag": 0,
+        "lag_basis": "market rate; public at month end (source convention)",
+        "first_date": "2017-03-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.42574257425742573,
+        "outlier_count": 0
+      },
+      {
+        "series": "spread_10y_2y",
+        "source_interface": "bond_zh_us_rate",
+        "source_column": "中国国债收益率10年-2年",
+        "transform": "monthly mean of daily spread, level in percent",
+        "lag": 0,
+        "lag_basis": "market yield/spread; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 5
+      },
+      {
+        "series": "stock_mktcap_yoy",
+        "source_interface": "macro_china_stock_market_cap",
+        "source_column": "市价总值-上海 + 市价总值-深圳",
+        "transform": "total market cap level, YoY % vs same month previous year (no seasonal adjustment)",
+        "lag": 0,
+        "lag_basis": "month-end stock market data; public at month end (source convention)",
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31",
+        "missing_share": 0.0,
+        "outlier_count": 3
+      },
+      {
+        "series": "tsf_12m_yoy",
+        "source_interface": "macro_china_shrzgm",
+        "source_column": "社会融资规模增量",
+        "transform": "12-month rolling sum, then YoY % (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: TSF published in following month (assumption; raw has no release date)",
+        "first_date": "2016-12-31",
+        "last_date": "2026-04-30",
+        "missing_share": 0.4405940594059406,
+        "outlier_count": 0
+      },
+      {
+        "series": "unemployment",
+        "source_interface": "macro_china_urban_unemployment",
+        "source_column": "value (item=全国城镇调查失业率)",
+        "transform": "level in percent (no seasonal adjustment)",
+        "lag": 1,
+        "lag_basis": "brief default: labour survey published in following month (assumption; raw has no release date)",
+        "first_date": "2018-01-31",
+        "last_date": "2026-09-30",
+        "missing_share": 0.4801980198019802,
+        "outlier_count": 3
+      }
+    ],
+    "lags": {
+      "central_bank_assets_yoy": 1,
+      "cgb10y": 0,
+      "cgb2y": 0,
+      "cgb30y": 0,
+      "cgb5y": 0,
+      "commodity_price_yoy": 1,
+      "commodity_spot_yoy": 0,
+      "consumer_confidence": 1,
+      "cpi_yoy": 1,
+      "electricity_yoy": 1,
+      "exports_yoy": 1,
+      "fai_ytd_yoy": 1,
+      "fiscal_revenue_yoy": 1,
+      "fx_reserves_yoy": 1,
+      "gdp_yoy": 1,
+      "imports_yoy": 1,
+      "industrial_production_yoy": 1,
+      "industrial_profit_yoy": 1,
+      "lpr_1y": 0,
+      "lpr_5y": 0,
+      "m1_yoy": 1,
+      "m2_yoy": 1,
+      "margin_balance_yoy": 0,
+      "new_credit_yoy": 1,
+      "pmi": 0,
+      "pmi_non_man": 0,
+      "ppi_yoy": 1,
+      "real_estate_climate": 1,
+      "retail_yoy": 1,
+      "shibor_3m": 0,
+      "spread_10y_2y": 0,
+      "stock_mktcap_yoy": 0,
+      "tsf_12m_yoy": 1,
+      "unemployment": 1
+    },
+    "missing": [
+      {
+        "series": "pmi",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "gdp_yoy",
+        "missing_count": 135,
+        "missing_share": 0.6683168316831684,
+        "first_date": "2010-03-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "cgb10y",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "spread_10y_2y",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "shibor_3m",
+        "missing_count": 86,
+        "missing_share": 0.42574257425742573,
+        "first_date": "2017-03-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "pmi_non_man",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "cpi_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "ppi_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "m2_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "m1_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "tsf_12m_yoy",
+        "missing_count": 89,
+        "missing_share": 0.4405940594059406,
+        "first_date": "2016-12-31",
+        "last_date": "2026-04-30"
+      },
+      {
+        "series": "new_credit_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "lpr_1y",
+        "missing_count": 45,
+        "missing_share": 0.22277227722772278,
+        "first_date": "2013-10-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "lpr_5y",
+        "missing_count": 115,
+        "missing_share": 0.5693069306930693,
+        "first_date": "2019-08-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "retail_yoy",
+        "missing_count": 31,
+        "missing_share": 0.15346534653465346,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "industrial_production_yoy",
+        "missing_count": 30,
+        "missing_share": 0.1485148514851485,
+        "first_date": "2010-02-28",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "fai_ytd_yoy",
+        "missing_count": 51,
+        "missing_share": 0.2524752475247525,
+        "first_date": "2013-02-28",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "exports_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "imports_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "consumer_confidence",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "electricity_yoy",
+        "missing_count": 19,
+        "missing_share": 0.09405940594059406,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "real_estate_climate",
+        "missing_count": 19,
+        "missing_share": 0.09405940594059406,
+        "first_date": "2010-02-28",
+        "last_date": "2025-12-31"
+      },
+      {
+        "series": "fx_reserves_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "unemployment",
+        "missing_count": 97,
+        "missing_share": 0.4801980198019802,
+        "first_date": "2018-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "fiscal_revenue_yoy",
+        "missing_count": 17,
+        "missing_share": 0.08415841584158416,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "commodity_price_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "stock_mktcap_yoy",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "commodity_spot_yoy",
+        "missing_count": 35,
+        "missing_share": 0.17326732673267325,
+        "first_date": "2012-12-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "central_bank_assets_yoy",
+        "missing_count": 1,
+        "missing_share": 0.0049504950495049506,
+        "first_date": "2010-01-31",
+        "last_date": "2026-09-30"
+      },
+      {
+        "series": "margin_balance_yoy",
+        "missing_count": 15,
+        "missing_share": 0.07425742574257425,
+        "first_date": "2011-04-30",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "cgb2y",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "cgb5y",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "cgb30y",
+        "missing_count": 0,
+        "missing_share": 0.0,
+        "first_date": "2010-01-31",
+        "last_date": "2026-10-31"
+      },
+      {
+        "series": "industrial_profit_yoy",
+        "missing_count": 25,
+        "missing_share": 0.12376237623762376,
+        "first_date": "2010-02-28",
+        "last_date": "2026-09-30"
+      }
+    ],
+    "january_february_affected": [
+      {
+        "series": "retail_yoy",
+        "month": 1,
+        "missing_share": 0.8823529411764706,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "retail_yoy",
+        "month": 2,
+        "missing_share": 0.8823529411764706,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "industrial_production_yoy",
+        "month": 1,
+        "missing_share": 1.0,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "industrial_production_yoy",
+        "month": 2,
+        "missing_share": 0.7058823529411765,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "fai_ytd_yoy",
+        "month": 1,
+        "missing_share": 1.0,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "fai_ytd_yoy",
+        "month": 2,
+        "missing_share": 0.17647058823529413,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "electricity_yoy",
+        "month": 1,
+        "missing_share": 0.9411764705882353,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "electricity_yoy",
+        "month": 2,
+        "missing_share": 0.0,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "industrial_profit_yoy",
+        "month": 1,
+        "missing_share": 1.0,
+        "reason": "January not published separately or combined with February; values left missing"
+      },
+      {
+        "series": "industrial_profit_yoy",
+        "month": 2,
+        "missing_share": 0.0,
+        "reason": "January not published separately or combined with February; values left missing"
+      }
+    ],
+    "pmi_regime": [
+      {
+        "threshold": 50.0,
+        "pmi_below_share": 0.3069306930693069,
+        "regime_share": 0.2079207920792079,
+        "regime_months": 42
+      },
+      {
+        "threshold": 49.5,
+        "pmi_below_share": 0.18316831683168316,
+        "regime_share": 0.07425742574257425,
+        "regime_months": 15
+      }
+    ],
+    "gdp_construction": {
+      "derived_quarters": 79,
+      "validation_quarters": 59,
+      "validation_max_abs_diff_pp": 0.828622535115823,
+      "validation_mean_abs_diff_pp": 0.16995874548281775
+    },
+    "checks": [
+      {
+        "name": "dates sorted",
+        "passed": true,
+        "detail": "n=202"
+      },
+      {
+        "name": "dates unique",
+        "passed": true,
+        "detail": "duplicates=0"
+      },
+      {
+        "name": "month-end dates",
+        "passed": true,
+        "detail": "all dates are calendar month ends"
+      },
+      {
+        "name": "d >= 20 series",
+        "passed": true,
+        "detail": "d=34"
+      },
+      {
+        "name": "at least 120 months",
+        "passed": true,
+        "detail": "months=202"
+      },
+      {
+        "name": "every panel column in macro_meta",
+        "passed": true,
+        "detail": "missing=[]"
+      },
+      {
+        "name": "macro_meta has no extra series",
+        "passed": true,
+        "detail": "extra=[]"
+      },
+      {
+        "name": "all lags non-negative integers",
+        "passed": true,
+        "detail": "bad=[]"
+      },
+      {
+        "name": "pmi in 30..70",
+        "passed": true,
+        "detail": "min=35.70 max=55.80 n=202"
+      },
+      {
+        "name": "gdp_yoy only on quarter-end months",
+        "passed": true,
+        "detail": "non_quarter_end=[]"
+      }
+    ],
+    "interfaces": [
+      {
+        "interface": "macro_china_pmi",
+        "status": "skipped",
+        "detail": "cached macro_china_pmi.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_pmi.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_non_man_pmi",
+        "status": "skipped",
+        "detail": "cached macro_china_non_man_pmi.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_non_man_pmi.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_cx_pmi_yearly",
+        "status": "skipped",
+        "detail": "cached macro_china_cx_pmi_yearly.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cx_pmi_yearly.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_cx_services_pmi_yearly",
+        "status": "skipped",
+        "detail": "cached macro_china_cx_services_pmi_yearly.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cx_services_pmi_yearly.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_cpi",
+        "status": "skipped",
+        "detail": "cached macro_china_cpi.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cpi.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_cpi_yearly",
+        "status": "skipped",
+        "detail": "cached macro_china_cpi_yearly.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_cpi_yearly.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_ppi",
+        "status": "skipped",
+        "detail": "cached macro_china_ppi.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_ppi.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_ppi_yearly",
+        "status": "skipped",
+        "detail": "cached macro_china_ppi_yearly.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_ppi_yearly.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_money_supply",
+        "status": "skipped",
+        "detail": "cached macro_china_money_supply.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_money_supply.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_shrzgm",
+        "status": "skipped",
+        "detail": "cached macro_china_shrzgm.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_shrzgm.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_new_financial_credit",
+        "status": "skipped",
+        "detail": "cached macro_china_new_financial_credit.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_new_financial_credit.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_lpr",
+        "status": "skipped",
+        "detail": "cached macro_china_lpr.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_lpr.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_consumer_goods_retail",
+        "status": "skipped",
+        "detail": "cached macro_china_consumer_goods_retail.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_consumer_goods_retail.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_industrial_production_yoy",
+        "status": "skipped",
+        "detail": "cached macro_china_industrial_production_yoy.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_industrial_production_yoy.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_gyzjz",
+        "status": "skipped",
+        "detail": "cached macro_china_gyzjz.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gyzjz.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_gdzctz",
+        "status": "skipped",
+        "detail": "cached macro_china_gdzctz.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdzctz.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_exports_yoy",
+        "status": "skipped",
+        "detail": "cached macro_china_exports_yoy.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_exports_yoy.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_imports_yoy",
+        "status": "skipped",
+        "detail": "cached macro_china_imports_yoy.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_imports_yoy.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_trade_balance",
+        "status": "skipped",
+        "detail": "cached macro_china_trade_balance.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_trade_balance.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_hgjck",
+        "status": "skipped",
+        "detail": "cached macro_china_hgjck.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_hgjck.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_xfzxx",
+        "status": "skipped",
+        "detail": "cached macro_china_xfzxx.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_xfzxx.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_society_electricity",
+        "status": "skipped",
+        "detail": "cached macro_china_society_electricity.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_society_electricity.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_gdp",
+        "status": "skipped",
+        "detail": "cached macro_china_gdp.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdp.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_gdp_yearly",
+        "status": "skipped",
+        "detail": "cached macro_china_gdp_yearly.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_gdp_yearly.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_real_estate",
+        "status": "skipped",
+        "detail": "cached macro_china_real_estate.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_real_estate.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_enterprise_boom_index",
+        "status": "skipped",
+        "detail": "cached macro_china_enterprise_boom_index.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_enterprise_boom_index.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_fx_gold",
+        "status": "skipped",
+        "detail": "cached macro_china_fx_gold.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_fx_gold.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_urban_unemployment",
+        "status": "skipped",
+        "detail": "cached macro_china_urban_unemployment.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_urban_unemployment.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_czsr",
+        "status": "skipped",
+        "detail": "cached macro_china_czsr.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_czsr.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_qyspjg",
+        "status": "skipped",
+        "detail": "cached macro_china_qyspjg.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_qyspjg.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_stock_market_cap",
+        "status": "skipped",
+        "detail": "cached macro_china_stock_market_cap.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_stock_market_cap.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_commodity_price_index",
+        "status": "skipped",
+        "detail": "cached macro_china_commodity_price_index.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_commodity_price_index.csv",
+        "retrieved_at": "2026-11-05T13:38:37+08:00"
+      },
+      {
+        "interface": "macro_china_society_traffic_volume",
+        "status": "failed",
+        "detail": "attempt 1: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=124&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)'))) | attempt 2: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=186&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)'))) | attempt 3: SSLError: HTTPSConnectionPool(host='quotes.sina.cn', port=443): Max retries exceeded with url: /mac/api/jsonp_v3.php/SINAREMOTECALLCALLBACK1601559094538/MacPage_Service.get_pagedata?cate=industry&event=10&from=31&num=31&condition= (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1035)')))",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_society_traffic_volume.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "macro_china_central_bank_balance",
+        "status": "skipped",
+        "detail": "cached macro_china_central_bank_balance.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_central_bank_balance.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "macro_china_bank_financing",
+        "status": "skipped",
+        "detail": "cached macro_china_bank_financing.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_bank_financing.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "macro_china_retail_price_index",
+        "status": "skipped",
+        "detail": "cached macro_china_retail_price_index.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_retail_price_index.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "macro_china_market_margin_sh",
+        "status": "skipped",
+        "detail": "cached macro_china_market_margin_sh.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_market_margin_sh.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "bond_zh_us_rate",
+        "status": "skipped",
+        "detail": "cached bond_zh_us_rate.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/bond_zh_us_rate.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "macro_china_nbs_nation:industrial_profit",
+        "status": "skipped",
+        "detail": "cached macro_china_nbs_industrial_profit.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/raw/q3/macro_china_nbs_industrial_profit.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      },
+      {
+        "interface": "committed SHIBOR",
+        "status": "ok",
+        "detail": "using data/clean/shibor.csv",
+        "path": "/Users/luhao/E-Study/ap2026/data/clean/shibor.csv",
+        "retrieved_at": "2026-11-05T13:39:36+08:00"
+      }
+    ],
+    "limitations": [
+      "Data are the current revised vintage, not real-time vintages; revised history can differ from what was available in real time.",
+      "Most raw interfaces carry no genuine release-date stamp; availability lags are conservative assumptions based on the brief defaults unless the source convention makes lag 0 definitional (market rates/yields).",
+      "Jin10 announcement-date interfaces (non_man_pmi, cx_pmi, cx_services_pmi, cpi_yearly, ppi_yearly, industrial_production_yoy, exports_yoy, imports_yoy, trade_balance, gdp_yearly) were saved raw but mostly stop in 2025; reference-month Eastmoney/customs/NBS interfaces were used for the panel. macro_china_gdp_yearly is used only as a cross-check.",
+      "macro_china_shrzgm (TSF) ends 2026-04 and macro_china_real_estate ends 2025-12 in the retrieved snapshot; both are retained with missing values after their last observation.",
+      "The committed SHIBOR snapshot starts 2015-05-08 but is very sparse before 2017-03; the first monthly mean with at least 10 daily observations is 2017-03, so shibor_3m is missing earlier.",
+      "macro_china_commodity_price_index is weekly before 2014-04 and daily afterwards; monthly means use available observations (at least four per month).",
+      "January is not published separately for industrial production, fixed investment and industrial profits; January/February values are left missing rather than imputed.",
+      "Industrial profits use the NBS generic interface macro_china_nbs_nation because akshare 1.20.25 has no dedicated industrial-profit interface.",
+      "Outlier flags use the full sample only for reporting; models must standardize on training windows."
+    ]
+  }
 }
