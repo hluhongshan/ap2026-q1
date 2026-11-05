@@ -1602,6 +1602,7 @@ def run_robustness(
     frame = pd.DataFrame(rows)
     summary_rows = []
     for design in ("random", "wing"):
+        per_design_requested = int(len(sample_dates) * (args.robust_seeds if design == "random" else 1))
         for model_name in ("svi", "neural"):
             values = np.asarray(pooled.get((design, model_name), []), dtype=float)
             stats = pooled_stats(values)
@@ -1612,7 +1613,7 @@ def run_robustness(
                 "design": design,
                 "model": model_name,
                 "fits": int(len(fit_rows)),
-                "fits_requested": int(requested_neural if model_name == "neural" else requested_svi),
+                "fits_requested": per_design_requested,
                 **stats,
             })
     summary_frame = pd.DataFrame(summary_rows)
@@ -1637,8 +1638,20 @@ def run_robustness(
         degradation.get("neural", {}).get("p95_delta", float("nan"))
         > degradation.get("svi", {}).get("p95_delta", float("nan"))
     )
+    wing_abs_neural_median = float(wing_rows.loc["neural", "median"]) if "neural" in wing_rows.index else float("nan")
+    wing_abs_svi_median = float(wing_rows.loc["svi", "median"]) if "svi" in wing_rows.index else float("nan")
+    wing_abs_neural_p95 = float(wing_rows.loc["neural", "p95"]) if "neural" in wing_rows.index else float("nan")
+    wing_abs_svi_p95 = float(wing_rows.loc["svi", "p95"]) if "svi" in wing_rows.index else float("nan")
     summary = {
         "pooled": summary_rows,
+        "wing_absolute_errors": {
+            "neural": {"median": wing_abs_neural_median, "p95": wing_abs_neural_p95},
+            "svi": {"median": wing_abs_svi_median, "p95": wing_abs_svi_p95},
+            "higher_absolute_error": {
+                "median": "neural" if wing_abs_neural_median > wing_abs_svi_median else "svi",
+                "p95": "neural" if wing_abs_neural_p95 > wing_abs_svi_p95 else "svi",
+            },
+        },
         "coverage": {
             "neural_fits_requested": int(requested_neural),
             "neural_fits_succeeded": int(succeeded_neural),
