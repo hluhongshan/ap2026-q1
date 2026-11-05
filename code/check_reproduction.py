@@ -23,6 +23,7 @@ TIMING_TOKENS = (
     "per_second",
     "timestamp",
 )
+HISTORICAL_SCENARIOS = {"approach2/io"}
 
 
 def is_timing_key(key: str) -> bool:
@@ -133,7 +134,17 @@ def main(argv: list[str] | None = None) -> int:
 
     reports = []
     failures = []
+    historical = sorted(
+        relative
+        for relative in set(reference_files) | set(candidate_files)
+        if str(relative.parent) in HISTORICAL_SCENARIOS
+    )
+    for relative in historical:
+        table.add_row(str(relative), "-", "-", "n/a", "n/a", "historical, not rerun")
+        reports.append({"file": str(relative), "status": "historical_not_rereproduced"})
     for relative in sorted(candidate_files):
+        if relative in historical:
+            continue
         if relative not in reference_files:
             reports.append({"file": str(relative), "status": "missing_reference"})
             table.add_row(str(relative), "0", "0", "n/a", "n/a", "missing committed reference")
@@ -180,11 +191,15 @@ def main(argv: list[str] | None = None) -> int:
         if report.get("only_reference"):
             console.print(f"[yellow]{report['file']}: {len(report['only_reference'])} numeric keys only in committed run[/yellow]")
 
-    missing = sorted(set(reference_files) - set(candidate_files))
+    missing = sorted(set(reference_files) - set(candidate_files) - set(historical))
     if missing:
         console.print("[yellow]committed scenarios not present in the reproduced tree (not rerun by design):[/yellow]")
         for relative in missing:
             console.print(f"  {relative}")
+    if historical:
+        console.print("[yellow]historical scenarios (not rerun, excluded from reproduction):[/yellow]")
+        for relative in historical:
+            console.print(f"  {relative}  historical, not rerun")
 
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
