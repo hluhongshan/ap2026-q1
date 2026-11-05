@@ -28,6 +28,12 @@ Output: results/approachN/<dataset>/metrics.json = {params, metrics, fit_seconds
 Terminal output via rich; figures via plotly HTML with include_plotlyjs=True.
 Every external data source has a committed snapshot; grading runs offline.
 
+## Reproduction
+`./reproduce.sh` is the full offline path; `./reproduce.sh --quick` runs tests and compare only.
+`python code/check_reproduction.py` compares `.cache/clean_clone_full/results` against the committed `results`, ignores timing fields, and uses relative tolerance 1e-6.
+`results/approach2/io` is a historical run from commit 664a716 and is not rerun.
+Latest clean-clone run: every shared numeric value matched exactly except the known stale Q1A close forward-check block. `results/approach1/io_close/metrics.json` predates commit 7551ad2 ("exp: like-for-like forward check"), so its `forward_check` schema and matched-pair `implied_q_median` differ from current code; it is kept unchanged to preserve reported numbers. Approach6 also records 216 extra `history.refits[*].min_epochs` config echoes that are absent from the committed metrics; all shared numbers match. No torch/random nondeterminism was observed.
+
 ## Agent rules
 Write nothing outside the repo root; tool caches stay in the repo and are gitignored.
 Propose first and wait for approval before any destructive operation.

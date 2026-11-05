@@ -8,6 +8,7 @@ Advanced Programming 2026 coursework: Q1 implied-volatility surfaces, Q2 Monte C
 
 Full reproduction: `./reproduce.sh`
 Quick checks (tests + comparison): `./reproduce.sh --quick`
+Clean-clone comparison: `python code/check_reproduction.py`
 
 ## Results
 
