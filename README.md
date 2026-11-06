@@ -1,6 +1,6 @@
-# AP 2026
+# AP 2026 Q1: implied-volatility surfaces
 
-Advanced Programming 2026 coursework: Q1 implied-volatility surfaces, Q2 Monte Carlo and CVaR hedging, Q3 PMI regime forecasting.
+Q1 of the Advanced Programming 2026 coursework: arbitrage-free implied-volatility surfaces on CFFEX IO options, with SVI slices (Q1A) and a neural surface (Q1B).
 
 ## Run
 
@@ -12,6 +12,9 @@ Clean-clone comparison: `python code/check_reproduction.py`
 
 ## Results
 
-- `results/approach2/io/` is a historical run from commit `664a716` whose code
-  has since changed. It is kept for the record and is **not** rerun by
-  `./reproduce.sh`; current Q1B output is `results/approach2/io_scaled/`.
+- `results/approach1/io/` and `results/approach1/io_close/` are the Q1A settle and close runs.
+- `results/approach2/io_scaled/` is the primary Q1B result; `results/approach2/io/` is the historical pre-fix run, labelled historical and not rerun.
+
+## Provenance
+
+Split from the combined AP 2026 repository at parent tag `submission`, commit `4521da3`. See `SPLIT_HISTORY.md` for the commit map and disclosure. `SESSION.md` is the full transcript for all questions and uses the old file names and hashes.
